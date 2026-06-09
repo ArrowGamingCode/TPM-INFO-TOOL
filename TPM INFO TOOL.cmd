@@ -517,9 +517,17 @@ function Show-UserRecommendedSteps ($Data) {
 
 function Get-IntelMeVersion {
     try {
-        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver | Where-Object { $_.DeviceName -like "*Intel*Management Engine*" } | Select-Object -First 1
+        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver |
+            Where-Object { $_.DeviceName -like "*Intel*Management Engine*" } | Select-Object -First 1
+
         if ($meDriver -and $meDriver.DriverVersion) {
-            return $meDriver.DriverVersion
+            if ($meDriver.DriverDate) {
+                $rawDate = $meDriver.DriverDate
+                $formattedDate = "{0}-{1}-{2}" -f $rawDate.Year, $rawDate.Month.ToString("00"), $rawDate.Day.ToString("00")
+                return "$($meDriver.DriverVersion) (Date: $formattedDate)"
+            } else {
+                return "$($meDriver.DriverVersion) (Date: Unknown)"
+            }
         } else {
             return "Not Found"
         }
