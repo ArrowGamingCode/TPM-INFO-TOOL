@@ -524,15 +524,31 @@ function Get-IntelMeVersion {
             if ($meDriver.DriverDate) {
                 $rawDate = $meDriver.DriverDate
                 $formattedDate = "{0}-{1}-{2}" -f $rawDate.Year, $rawDate.Month.ToString("00"), $rawDate.Day.ToString("00")
-                return "$($meDriver.DriverVersion) (Date: $formattedDate)"
+                return [PSCustomObject]@{
+                    Version = $meDriver.DriverVersion
+                    Date    = $formattedDate
+                    RawDate = [datetime]$rawDate
+                }
             } else {
-                return "$($meDriver.DriverVersion) (Date: Unknown)"
+                return [PSCustomObject]@{
+                    Version = $meDriver.DriverVersion
+                    Date    = "Unknown"
+                    RawDate = $null
+                }
             }
         } else {
-            return "Not Found"
+            return [PSCustomObject]@{
+                Version = "Not Found"
+                Date    = "N/A"
+                RawDate = $null
+            }
         }
     } catch {
-        return "Error Querying Driver"
+        return [PSCustomObject]@{
+            Version = "Error Querying Driver"
+            Date    = "Error"
+            RawDate = $null
+        }
     }
 }
 
@@ -638,8 +654,23 @@ function Show-UIOutput ($Data) {
 		Log-Output "RESULT: Core Isolation Off"
 	}
 
-    Log-Output "Windows UEFI CA 2023:      $($Data.MicrosoftCa.Uefi2023Text)"
-	Log-Output "Intel ME:     $($Data.IntelMeVersion)"
+	Log-Output "IME Version: $($Data.IntelMeVersion.Version) - IME Date: $($Data.IntelMeVersion.Date)"
+
+    $biosObj = Get-CimInstance -ClassName Win32_Bios
+    if ($biosObj -and $biosObj.ReleaseDate -and $Data.IntelMeVersion.RawDate) {
+        try {
+            $biosDate = [datetime]$biosObj.ReleaseDate
+            $meDate = $Data.IntelMeVersion.RawDate
+            $dateDiff = [Math]::Abs(($biosDate - $meDate).TotalDays)
+
+            if ($dateDiff -gt 180) {
+                Log-Output "WARNING: BIOS & IME dates are over 6 months apart! ($([Math]::Round($dateDiff)) days difference)" 'Yellow'
+            } else {
+                Log-Output "IME Sync: Passed (Dates are within 6 months)" 'Green'
+            }
+        }catch { }
+    }
+
     Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
 
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
