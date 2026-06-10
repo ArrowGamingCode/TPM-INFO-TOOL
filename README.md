@@ -6,4 +6,4 @@ An experimental tool that displays technical information to help troubleshoot TP
 2) The program will display a list of TPM related info and automatically copy it to your clipboard.
 3) Look for the overall TPM Attestation PASS/FAIL at the bottom!
 <br />
-![Program Screenshot](example.jpg)
+![Screenshot](example.jpg)
