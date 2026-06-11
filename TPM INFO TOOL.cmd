@@ -626,9 +626,19 @@ function Show-UIOutput ($Data) {
     Log-Output "`n--- XTRAS ---" 'Cyan'
     Log-Output "COD Broker:   $($Data.CodBroker.Text)"
     if ($Data.CodBroker.Passed) { Log-Output 'RESULT: COD Broker Service Pass' 'Green' } else { Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red' }
-    if ($Data.BrokerExe)        { Log-Output 'RESULT: CODBrokerService.exe Binary Exists (Pass)' 'Green' } else { Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow' }
 
-     if ($Data.Randgrid.RegKeyExists) {
+    if ($Data.BrokerExe) {
+        try {
+            $brokerVersion = (Get-ItemProperty -Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe').VersionInfo.FileVersion
+            Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$brokerVersion) (Pass)" 'Green'
+        } catch {
+            Log-Output 'RESULT: CODBrokerService.exe Binary Exists (Version Unreadable) (Pass)' 'Green'
+        }
+    } else {
+        Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow' 
+    }
+
+    if ($Data.Randgrid.RegKeyExists) {
         Log-Output 'RESULT: randgrid Registry Key Exists (Pass)' 'Green'
     } else {
         Log-Output 'CRITICAL: randgrid Registry Key Missing (Fail)' 'Red'
