@@ -452,14 +452,14 @@ function Protect-AIKPrivacy {
             -replace $thumbprintPattern, ".." `
             -replace $keyIdPattern, ".." `
             -replace $requestIdPattern, "" `
-             -replace $clientRequestIdPattern, "" `
+            -replace $clientRequestIdPattern, "" `
             -replace $serialPattern, ".." `
             -replace $keyPattern, ".." `
             -replace $enrollStepsPattern, "" `
             -replace $contentLengthPattern, "" `
             -replace $datePattern, "" `
             -replace $aesPattern, "[REMOVED]" `
-             -replace $shaPattern, "[REMOVED]" `
+            -replace $shaPattern, "[REMOVED]" `
 			-replace $versionPattern, "" `
 			-replace $systemUserPattern, ""
 
@@ -585,8 +585,47 @@ function Get-TpmEndorsementCertStatus {
 # UI RENDERING PIPELINE
 # =========================================================================
 
+function Show-Banner ($enrollSuccess, $criticalHardwarePass) {
+    Log-Output "=========================================================================" 'Cyan'
+    if ($enrollSuccess -and $criticalHardwarePass) {
+        Log-Output "|                            [ OVERALL: TPM Attestation PASS ]                              |" 'Green'
+    } else {
+        Log-Output "|                            [ OVERALL: TPM Attestation FAIL ]                          |" 'Red'
+    }
+    Log-Output "=========================================================================" 'Cyan'
+}
+
 function Show-UIOutput ($Data) {
+    if ($TestFile -and (Test-Path $TestFile)) {
+        $certRaw = Get-Content $TestFile -Raw
+    } else {
+        $certRaw = certreq -enrollaik -config '""' 2>&1 | Out-String
+    }
+
+    $successPatterns = "Success|Certificate Request Created|Certificate Enrolled|(?=.*New Certificate)(?=.*EnrollStatus\(1\):)"
+	$enrollSuccess = $certRaw -match $successPatterns
+    $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
+
     Clear-Host
+
+    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
+
+    if (-not ($enrollSuccess -and $criticalHardwarePass)) {
+        Log-Output "FAILED: TPM Attention is not working on this pc.`n" 'Red'
+
+        if ($certRaw) {
+            $certRaw -split "`r?`n" | ForEach-Object {
+                if ($_ -match '^\s*\{\s*"Message"\s*:') {
+                    try {
+                        $jsonObject = $_ | ConvertFrom-Json
+                        Log-Output $jsonObject.Message 'Red'
+                    } catch {
+                        Log-Output $_ 'Red'
+                    }
+                  }
+            }
+        }
+    }
 
     Log-Output 'TPM INFO TOOL - 1.0.0'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -600,7 +639,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
-     if (!$Data.CpuInfo.Passed) { Log-Output 'CRITICAL: Old CPUs may not be supported' 'Red' }
+    if (!$Data.CpuInfo.Passed) { Log-Output 'CRITICAL: Old CPUs may not be supported' 'Red' }
     if ($Data.TpmInfo.Passed)  { Log-Output 'RESULT: TPM 2.0 Version Pass' 'Green' } else { Log-Output "CRITICAL: $($Data.TpmInfo.Text)" 'Red' }
 
     if ($Data.TpmOwnership.Passed) {
@@ -681,6 +720,8 @@ function Show-UIOutput ($Data) {
         }catch { }
     }
 
+	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days. Original Install OS: $($Data.OriginalOSBuild)"
+
     Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
 
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
@@ -689,45 +730,12 @@ function Show-UIOutput ($Data) {
     Log-Output "Authorized DB Key:         $($Data.SbKeys.DB)"
     Log-Output ""
 
-    # --- CONDITIONAL INPUT: TEST FILE VS CERTREQ ---
-    if ($TestFile -and (Test-Path $TestFile)) {
-        Log-Output "--- USING TEST FILE INPUT: $TestFile ---" 'Yellow'
-        $certRaw = Get-Content $TestFile -Raw
-    } else {
-        $certRaw = certreq -enrollaik -config '""' 2>&1 | Out-String
-    }
-
     $certOut = $certRaw | Protect-AIKPrivacy
     Write-Host $certOut
     $global:ClipboardBuffer += $certOut
 
-    # --- OVERALL PASS/FAIL BANNER LOGIC ---
-	$successPatterns = "Success|Certificate Request Created|Certificate Enrolled|(?=.*New Certificate)(?=.*EnrollStatus\(1\):)"
-	$enrollSuccess = $certRaw -match $successPatterns
-
-    $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
-
-    Log-Output "`n=========================================================================" 'Cyan'
-    if ($enrollSuccess -and $criticalHardwarePass) {
-        Log-Output "|                            [ OVERALL: TPM Attestation PASS ]                              |" 'Green'
-    } else {
-        Log-Output "|                            [ OVERALL: TPM Attestation FAIL ]                          |" 'Red'
-        Log-Output "FAILED: TPM Attention is not working on this pc." 'Red'
-
-        if ($certRaw) {
-            $certRaw -split "`r?`n" | ForEach-Object {
-                if ($_ -match '^\s*\{\s*"Message"\s*:') {
-                    try {
-                        $jsonObject = $_ | ConvertFrom-Json
-                        Log-Output $jsonObject.Message 'Red'
-                    } catch {
-                        Log-Output $_ 'Red'
-                    }
-                  }
-            }
-        }
-    }
-    Log-Output "=========================================================================" 'Cyan'
+    Log-Output ""
+    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
     # Direct string pipeline allocation straight to windows clipboard
     $global:ClipboardBuffer | Set-Clipboard
@@ -740,6 +748,22 @@ function Show-UIOutput ($Data) {
 
 function Invoke-MainExecution {
     $global:platforms = Get-PlatformInstallStatus
+
+	$originalOS = "Unknown"
+    $subVersion = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "SubVersion" -ErrorAction SilentlyContinue
+    $buildLab   = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "BuildLabEx" -ErrorAction SilentlyContinue
+
+    if ($subVersion -and $subVersion.SubVersion -match "Original Install: Windows 10") {
+        $originalOS = "Windows 10"
+    } elseif ($subVersion -and $subVersion.SubVersion -match "Original Install: Windows 11") {
+        $originalOS = "Windows 11"
+    } elseif ($buildLab) {
+        $buildNumber = ($buildLab.BuildLabEx -split "\.")[0]
+		$parsedBuild = 0
+        if ([int]::TryParse($buildNumber, [ref]$parsedBuild)) {
+            if ($parsedBuild -ge 22000) { $originalOS = "Windows 11" } else { $originalOS = "Windows 10" }
+        }
+    }
 
     $systemData = [PSCustomObject]@{
         CpuInfo        = Get-CpuCompliance
@@ -762,6 +786,8 @@ function Invoke-MainExecution {
         CoreIsolation  = Get-CoreIsolationHardwareStatus
 		IntelMeVersion = Get-IntelMeVersion
 		TpmEndorsement = Get-TpmEndorsementCertStatus
+		OriginalOSBuild = $originalOS
+        DaysSinceInstall = [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays)
     }
 
     Show-UIOutput -Data $systemData
