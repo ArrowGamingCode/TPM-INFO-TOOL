@@ -633,14 +633,23 @@ function Get-TpmEndorsementCertStatus {
 # UI RENDERING PIPELINE
 # =========================================================================
 
-function Show-Banner ($enrollSuccess, $criticalHardwarePass) {
-    Log-Output "=========================================================================" 'Cyan'
+function Show-Banner ($enrollSuccess, $criticalHardwarePass, [switch]$ConsoleOnly) {
+    $LogCmd = if ($ConsoleOnly) { { param($msg, $color) Write-Host $msg -ForegroundColor $color } }
+              else { { param($msg, $color) Log-Output $msg $color } }
+
     if ($enrollSuccess -and $criticalHardwarePass) {
-        Log-Output "|                            [ OVERALL: TPM Attestation PASS ]                              |" 'Green'
+        $statusText = "PASS"
+        $color      = "Green"
+        $padding    = if ($ConsoleOnly) { " " * 28 } else { " " * 28 }
     } else {
-        Log-Output "|                            [ OVERALL: TPM Attestation FAIL ]                          |" 'Red'
+        $statusText = "FAIL"
+        $color      = "Red"
+        $padding    = if ($ConsoleOnly) { " " * 26 } else { " " * 26 }
     }
-    Log-Output "=========================================================================" 'Cyan'
+
+    &$LogCmd "=========================================================================" 'Cyan'
+    &$LogCmd "| $padding [ OVERALL: TPM Attestation $statusText ] $padding |" $color
+    &$LogCmd "=========================================================================" 'Cyan'
 }
 
 function Show-UIOutput ($Data) {
@@ -655,7 +664,7 @@ function Show-UIOutput ($Data) {
     $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
 
     Clear-Host
-    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
+    Show-Banner -enrollSuccess $true -criticalHardwarePass $true -ConsoleOnly
 
     Log-Output 'TPM INFO TOOL - 1.0.0'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -778,7 +787,7 @@ function Show-UIOutput ($Data) {
     }
 	Log-Output ""
 
-    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
+    Show-Banner -enrollSuccess $true -criticalHardwarePass $true
 
     if (-not ($enrollSuccess -and $criticalHardwarePass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
