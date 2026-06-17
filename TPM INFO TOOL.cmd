@@ -16,7 +16,6 @@ if %errorLevel% neq 0 (
     exit /b
 )
 
-:: Store the file path in an environment variable for PowerShell to read safely
 set "TPM_TEST_FILE=%~1"
 
 cls
@@ -467,6 +466,19 @@ function Protect-AIKPrivacy {
     }
 }
 
+function Get-BitLockerStatus {
+    try {
+        $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
+        if ($blVolume -and $blVolume.ProtectionStatus -eq "On") {
+            return [PSCustomObject]@{ Text = "Yes"; Passed = $true }
+        } else {
+            return [PSCustomObject]@{ Text = "No"; Passed = $false }
+        }
+    } catch {
+        return [PSCustomObject]@{ Text = "No / Not Supported"; Passed = $false }
+    }
+}
+
 function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
      if ($NoNewLine) {
         Write-Host $Text -ForegroundColor $Color -NoNewline
@@ -721,6 +733,11 @@ function Show-UIOutput ($Data) {
     }
 
 	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days. Original Install OS: $($Data.OriginalOSBuild)"
+	if ($Data.BitLocker.Passed) {
+        Log-Output "BitLocker Enabled: Yes" 'Red'
+    } else {
+        Log-Output "BitLocker Enabled: No"
+    }
 
     Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
 
@@ -788,6 +805,7 @@ function Invoke-MainExecution {
 		TpmEndorsement = Get-TpmEndorsementCertStatus
 		OriginalOSBuild = $originalOS
         DaysSinceInstall = [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays)
+		BitLocker      = Get-BitLockerStatus
     }
 
     Show-UIOutput -Data $systemData
