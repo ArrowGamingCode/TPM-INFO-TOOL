@@ -6,7 +6,7 @@
 
 <# : chooser
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 net session >nul 2>&1
@@ -20,6 +20,17 @@ set "TPM_TEST_FILE=%~1"
 
 cls
 echo Please wait while system information is retrieved...
+set "TpmDeviceData="
+
+for /f "usebackq tokens=* delims=" %%A in (`tpmtool getdeviceinformation`) do (
+    if not defined TpmDeviceData (
+        set "TpmDeviceData=%%A"
+    ) else (
+        set "TpmDeviceData=!TpmDeviceData! | %%A"
+    )
+)
+echo Stage 1 done.
+
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0' -Raw) -join [Environment]::NewLine)"
 echo -------------------------------------------------------------------------
 pause
@@ -466,6 +477,31 @@ function Protect-AIKPrivacy {
     }
 }
 
+function Convert-TpmStringToObject {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$TpmString
+    )
+
+    $cleanString = $TpmString.Trim().TrimEnd(';')
+    $pairs = $cleanString.Split('|')
+    $tpmProperties = [ordered]@{}
+
+    foreach ($pair in $pairs) {
+        if ($pair -match '-(?<Key>.*?):\s*(?<Value>.*)') {
+            $key = $Matches['Key'].Trim()
+            $value = $Matches['Value'].Trim()
+
+            if ($value -eq 'True') { $value = $true }
+            elseif ($value -eq 'False') { $value = $false }
+
+            $tpmProperties[$key] = $value
+        }
+    }
+    return [PSCustomObject]$tpmProperties
+}
+
 function Get-BitLockerStatus {
     try {
         $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
@@ -751,7 +787,15 @@ function Show-UIOutput ($Data) {
     Write-Host $certOut
     $global:ClipboardBuffer += $certOut
 
-    Log-Output ""
+    Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
+    $exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version'
+    foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
+        if ($prop.Name -notin $exclude) {
+            Log-Output ("{0,-30}: {1}" -f $prop.Name, $prop.Value)
+        }
+    }
+	Log-Output ""
+
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
     # Direct string pipeline allocation straight to windows clipboard
@@ -782,6 +826,8 @@ function Invoke-MainExecution {
         }
     }
 
+	$parsedTpmObject = Convert-TpmStringToObject -TpmString $env:TpmDeviceData
+
     $systemData = [PSCustomObject]@{
         CpuInfo        = Get-CpuCompliance
         RamSlots       = Get-RamDetails
@@ -806,6 +852,7 @@ function Invoke-MainExecution {
 		OriginalOSBuild = $originalOS
         DaysSinceInstall = [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays)
 		BitLocker      = Get-BitLockerStatus
+		ExtendedTpmProperties = $parsedTpmObject
     }
 
     Show-UIOutput -Data $systemData
