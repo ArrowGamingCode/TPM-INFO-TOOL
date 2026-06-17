@@ -664,7 +664,7 @@ function Show-UIOutput ($Data) {
     $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
 
     Clear-Host
-    Show-Banner -enrollSuccess $true -criticalHardwarePass $true -ConsoleOnly
+    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
     Log-Output 'TPM INFO TOOL - 1.0.0'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -787,7 +787,7 @@ function Show-UIOutput ($Data) {
     }
 	Log-Output ""
 
-    Show-Banner -enrollSuccess $true -criticalHardwarePass $true
+    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
     if (-not ($enrollSuccess -and $criticalHardwarePass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
