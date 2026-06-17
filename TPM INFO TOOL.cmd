@@ -264,16 +264,18 @@ function Get-ActivisionKeyStatus {
 function Get-CodBrokerStatus {
     $service = Get-Service -Name 'COD.Broker.Service' -ErrorAction SilentlyContinue
     if ($service) {
-         $passed = if ($service.StartType -eq 'Disabled') { $false } else { $true }
+        $passed = if ($service.StartType -eq 'Disabled') { $false } else { $true }
         $text   = if (-not $passed) { 'Disabled' } else { $service.Status.ToString() }
         return [PSCustomObject]@{
-            Text   = $text
-            Passed = $passed
+            Text      = $text
+            Passed    = $passed
+            StartType = $service.StartType.ToString()
         }
     } else {
         return [PSCustomObject]@{
-            Text   = 'Not Found / Missing'
-            Passed = $false
+            Text      = 'Not Found / Missing'
+            Passed    = $false
+            StartType = 'None'
         }
     }
 }
@@ -702,8 +704,16 @@ function Show-UIOutput ($Data) {
     if ($Data.BiosInfo.Passed) { Log-Output 'RESULT: BIOS Date Promising' 'Green' } else { Log-Output "WARNING: BIOS could be newer. $($MinBiosDate)" 'Yellow' }
 
     Log-Output "`n--- XTRAS ---" 'Cyan'
-    Log-Output "COD Broker:   $($Data.CodBroker.Text)"
-    if ($Data.CodBroker.Passed) { Log-Output 'RESULT: COD Broker Service Pass' 'Green' } else { Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red' }
+
+	Log-Output "COD Broker:   $($Data.CodBroker.Text) (StartType: $($Data.CodBroker.StartType))"
+	if ($Data.CodBroker.StartType -eq 'Automatic') {
+		# 'DarkYellow' acts as the standard console replacement for Orange
+		Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
+	} elseif ($Data.CodBroker.Passed) {
+		Log-Output 'RESULT: COD Broker Service Pass' 'Green'
+	} else {
+		Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
+	}
 
     if ($Data.BrokerExe) {
         try {
