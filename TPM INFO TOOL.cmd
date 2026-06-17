@@ -823,6 +823,7 @@ function Show-UIOutput ($Data) {
 
     if (-not ($enrollSuccess -and $criticalHardwarePass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
+		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
 
         if ($certRaw) {
             $certRaw -split "`r?`n" | ForEach-Object {
