@@ -602,6 +602,27 @@ function Get-IntelMeVersion {
     }
 }
 
+function Get-NvidiaDriverVersion {
+    try {
+        $gpu = Get-CimInstance -ClassName Win32_VideoController |
+               Where-Object { $_.Name -like "*NVIDIA*" } |
+               Select-Object -First 1
+
+        if ($gpu -and $gpu.DriverVersion) {
+            $rawVersion = $gpu.DriverVersion -replace '\.', ''
+            if ($rawVersion.Length -ge 5) {
+                $formattedVersion = ($rawVersion.Substring($rawVersion.Length - 5, 3) + "." + $rawVersion.Substring($rawVersion.Length - 2))
+                return $formattedVersion
+            }
+            return $gpu.DriverVersion
+        } else {
+            return "Not Detected"
+        }
+    } catch {
+        return "Error Querying"
+    }
+}
+
 function Get-TpmEndorsementCertStatus {
     try {
         $TpmInfo = Get-TpmEndorsementKeyInfo -HashAlgorithm SHA256 -ErrorAction Stop
@@ -672,6 +693,7 @@ function Show-UIOutput ($Data) {
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $((Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').ProductName)"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
+	Log-Output "Nvidia ver:   $($Data.NvidiaDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
     Log-Output "BIOS:          $($Data.BiosInfo.String)"
     Log-Output "Secure Boot:  $($Data.SecureBoot.Text)"
@@ -848,6 +870,7 @@ function Invoke-MainExecution {
 
     $systemData = [PSCustomObject]@{
         CpuInfo        = Get-CpuCompliance
+		NvidiaDriver   = Get-NvidiaDriverVersion
         RamSlots       = Get-RamDetails
         Mobo           = (Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
         BiosInfo         = Get-BiosCompliance
