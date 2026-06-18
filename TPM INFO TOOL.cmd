@@ -223,6 +223,18 @@ function Get-TpmStatus {
     }
 }
 
+function Get-LocalAttestationStatus {
+    try {
+        $features = Get-TpmSupportedFeature -ErrorAction SilentlyContinue
+        if ($features -match 'Key Attestation') {
+            return $true
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
 function Get-TpmOwnershipState {
     try {
         $tpmCmd = Get-Tpm -ErrorAction SilentlyContinue
@@ -682,14 +694,17 @@ function Show-UIOutput ($Data) {
         $certRaw = certreq -enrollaik -config '""' 2>&1 | Out-String
     }
 
-    $successPatterns = "Success|Certificate Request Created|Certificate Enrolled|(?=.*New Certificate)(?=.*EnrollStatus\(1\):)"
+    $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
 	$enrollSuccess = $certRaw -match $successPatterns
-    $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
+	if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
+        $enrollSuccess = $false
+    }
 
+	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed -and $Data.LocalAttest
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
-    Log-Output 'TPM INFO TOOL - 1.0.0'
+    Log-Output 'TPM INFO TOOL - 1.0.1'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $((Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').ProductName)"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
@@ -726,6 +741,12 @@ function Show-UIOutput ($Data) {
     if ($Data.BiosInfo.Passed) { Log-Output 'RESULT: BIOS Date Promising' 'Green' } else { Log-Output "WARNING: BIOS could be newer. $($MinBiosDate)" 'Yellow' }
 
     Log-Output "`n--- XTRAS ---" 'Cyan'
+
+    if ($Data.localAttest) {
+        Log-Output "Local Attestation: SUPPORTED" 'Green'
+    } else {
+        Log-Output "Local Attestation: FAILED / NOT SUPPORTED" 'Red'
+    }
 
 	Log-Output "COD Broker:   $($Data.CodBroker.Text) (StartType: $($Data.CodBroker.StartType))"
 	if ($Data.CodBroker.StartType -eq 'Automatic') {
@@ -821,6 +842,10 @@ function Show-UIOutput ($Data) {
 
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
+	if (-not ($enrollSuccess)) {
+		Log-Output "EnrollSuccess Fail." 'Red'
+	}
+
     if (-not ($enrollSuccess -and $criticalHardwarePass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
 		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
@@ -895,6 +920,7 @@ function Invoke-MainExecution {
         DaysSinceInstall = [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays)
 		BitLocker      = Get-BitLockerStatus
 		ExtendedTpmProperties = $parsedTpmObject
+		LocalAttest           = Get-LocalAttestationStatus
     }
 
     Show-UIOutput -Data $systemData
