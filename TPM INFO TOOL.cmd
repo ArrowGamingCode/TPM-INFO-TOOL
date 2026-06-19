@@ -595,6 +595,28 @@ function Print-PCRTable {
     Log-Output ""
 }
 
+function Get-IntelBiosCompliance {
+    $cpu = Get-CimInstance -ClassName Win32_Processor
+    if ($cpu.Name -notmatch 'Intel') {
+        return [PSCustomObject]@{
+            IsIntel                 = $false
+            RequiresFirmwareUpdate = $false
+            Version                 = "N/A"
+        }
+    }
+
+    $tpmObj = Get-CimInstance -Namespace 'Root\Cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm
+    $tpmVersion = if ($tpmObj) { $tpmObj.ManufacturerVersion } else { "Unknown" }
+
+    $requiresUpdate = $tpmVersion -match '^INTC 30[23]\.12\.'
+
+    return [PSCustomObject]@{
+        IsIntel                 = $true
+        RequiresFirmwareUpdate = $requiresUpdate
+        Version                 = $tpmVersion
+    }
+}
+
 function Get-BitLockerStatus {
     try {
         $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
@@ -734,6 +756,11 @@ function Show-UserRecommendedSteps ($Data) {
 
     if (!$Data.BiosInfo.Passed) {
         Log-Output "-> Check if there is a newer BIOS" 'Yellow'
+        $hasIssues = $true
+    }
+
+	if ($Data.IntelBiosInfo.IsIntel -and $Data.IntelBiosInfo.RequiresFirmwareUpdate) {
+        Log-Output "-> Your Intel PTT Firmware version ($($Data.IntelBiosInfo.Version)) appears to be outdated. Update BIOS/Firmware" 'Yellow'
         $hasIssues = $true
     }
 
@@ -1006,6 +1033,7 @@ function Invoke-MainExecution {
 		ExtendedTpmProperties = $parsedTpmObject
 		LocalAttest           = Get-LocalAttestationStatus
 		parsedTpmToolType = $parsedTpmToolTypeObject
+		IntelBiosInfo  = Get-IntelBiosCompliance
     }
 
     Show-UIOutput -Data $systemData
