@@ -20,21 +20,38 @@ set "TPM_TEST_FILE=%~1"
 
 cls
 echo Please wait while system information is retrieved...
-set "TpmDeviceData="
 
-for /f "usebackq tokens=* delims=" %%A in (`tpmtool getdeviceinformation`) do (
-    if not defined TpmDeviceData (
-        set "TpmDeviceData=%%A"
-    ) else (
-        set "TpmDeviceData=!TpmDeviceData! | %%A"
-    )
-)
+set "TpmDeviceData="
+set "TpmToolType="
+call :CollapseCommandOutput TpmDeviceData "tpmtool getdeviceinformation"
+call :CollapseCommandOutput TpmToolType "tpmtool /?"
+
 echo Stage 1 done.
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0' -Raw) -join [Environment]::NewLine)"
 echo -------------------------------------------------------------------------
 pause
 exit /b
+
+:CollapseCommandOutput
+set "varName=%~1"
+set "command=%~2"
+
+:: Clear the variable dynamically
+set "%varName%="
+
+for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
+    :: FIX: Cleaned up the dynamic assignment syntax to heavily insulate special characters
+    if "!%varName%!"=="" (
+        set "%varName%=%%A"
+    ) else (
+        for /f "delims=" %%B in ("!varName!") do (
+            set "current_val=!%%B!"
+            set "%%B=!current_val! | %%A"
+        )
+    )
+)
+goto :eof
 #>
 
 $MinBiosDate = [datetime]'2025-08-01'
@@ -516,6 +533,35 @@ function Convert-TpmStringToObject {
     return [PSCustomObject]$tpmProperties
 }
 
+function Get-TpmisWBCL {
+    param (
+        [string]$HelpText = ""
+    )
+
+    $modernPattern = "/PCRs|/DumpLog|/Output"
+    $legacyPattern = "getdeviceinformation|gatherlogs|parsetcglogs"
+
+	return $helpText -match $modernPattern
+}
+
+function Get-TpmToolTypeMessage {
+    param (
+        [string]$HelpText = ""
+    )
+
+    $legacyPattern = "getdeviceinformation|gatherlogs|parsetcglogs"
+
+    if (Get-TpmisWBCL($HelpText)) {
+        return "TPM Tool (Modern WBCL logs)"
+    }
+    elseif ($HelpText -match $legacyPattern) {
+        return "TPM Tool (Classic TCG logs)"
+    }
+    else {
+        return "Unknown if TCG or WBCL"
+    }
+}
+
 function Get-BitLockerStatus {
     try {
         $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
@@ -537,44 +583,6 @@ function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
         Write-Host $Text -ForegroundColor $Color
         $global:ClipboardBuffer += "$Text`r`n"
      }
-}
-
-# =========================================================================
-# USER RECOMMENDATION PIPELINE
-# =========================================================================
-
-function Show-UserRecommendedSteps ($Data) {
-    Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
-    $hasIssues = $false
-
-    if (!$Data.CpuInfo.Passed) {
-        Log-Output "-> Check your CPU is not a 1st or 2nd gen Ryzen as TPM Attestation is not supported." 'Yellow'
-        $hasIssues = $true
-    }
-
-    if ($Data.TpmInfo.AmdFixRequired) {
-        Log-Output "-> Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
-        $hasIssues = $true
-    }
-
-    if (!$Data.SecureBoot.Passed) {
-        Log-Output "-> SECURE BOOT is showing OFF: Check its on." 'Yellow'
-        $hasIssues = $true
-    }
-
-    if (!$Data.CsmInfo.Passed) {
-        Log-Output "-> Your system is running in Legacy/CSM mode instead of modern UEFI mode." 'Yellow'
-        $hasIssues = $true
-    }
-
-    if (!$Data.BiosInfo.Passed) {
-        Log-Output "-> Check if there is a newer BIOS" 'Yellow'
-        $hasIssues = $true
-    }
-
-    if (!$hasIssues) {
-        Log-Output "-> NA" 'Green'
-    }
 }
 
 function Get-IntelMeVersion {
@@ -647,7 +655,6 @@ function Get-TpmEndorsementCertStatus {
         } else {
             $CertIssuerList = @()
             foreach ($Cert in $TpmInfo.AdditionalCertificates) {
-                # Just pull the issuer string directly without building a validation chain
                 $CertIssuerList += "$($Cert.Issuer)"
             }
 
@@ -661,6 +668,44 @@ function Get-TpmEndorsementCertStatus {
             Text   = "Error or Access Denied Reading Endorsement Key Info"
             Passed = $false
         }
+    }
+}
+
+# =========================================================================
+# USER RECOMMENDATION PIPELINE
+# =========================================================================
+
+function Show-UserRecommendedSteps ($Data) {
+    Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
+    $hasIssues = $false
+
+    if (!$Data.CpuInfo.Passed) {
+        Log-Output "-> Check your CPU is not a 1st or 2nd gen Ryzen as TPM Attestation is not supported." 'Yellow'
+        $hasIssues = $true
+    }
+
+    if ($Data.TpmInfo.AmdFixRequired) {
+        Log-Output "-> Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
+        $hasIssues = $true
+    }
+
+    if (!$Data.SecureBoot.Passed) {
+        Log-Output "-> SECURE BOOT is showing OFF: Check its on." 'Yellow'
+        $hasIssues = $true
+    }
+
+    if (!$Data.CsmInfo.Passed) {
+        Log-Output "-> Your system is running in Legacy/CSM mode instead of modern UEFI mode." 'Yellow'
+        $hasIssues = $true
+    }
+
+    if (!$Data.BiosInfo.Passed) {
+        Log-Output "-> Check if there is a newer BIOS" 'Yellow'
+        $hasIssues = $true
+    }
+
+    if (!$hasIssues) {
+        Log-Output "-> NA" 'Green'
     }
 }
 
@@ -700,7 +745,9 @@ function Show-UIOutput ($Data) {
         $enrollSuccess = $false
     }
 
-	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed -and $Data.LocalAttest
+	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
+#(unsure if all system work with this	-and $Data.LocalAttest
+
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
@@ -832,6 +879,7 @@ function Show-UIOutput ($Data) {
     $global:ClipboardBuffer += $certOut
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
+	Log-Output $data.parsedTpmToolType
     $exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version'
     foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
         if ($prop.Name -notin $exclude) {
@@ -893,6 +941,7 @@ function Invoke-MainExecution {
     }
 
 	$parsedTpmObject = Convert-TpmStringToObject -TpmString $env:TpmDeviceData
+	$parsedTpmToolTypeObject = Get-TpmToolTypeMessage -HelpText $env:TpmToolType
 
     $systemData = [PSCustomObject]@{
         CpuInfo        = Get-CpuCompliance
@@ -921,6 +970,7 @@ function Invoke-MainExecution {
 		BitLocker      = Get-BitLockerStatus
 		ExtendedTpmProperties = $parsedTpmObject
 		LocalAttest           = Get-LocalAttestationStatus
+		parsedTpmToolType = $parsedTpmToolTypeObject
     }
 
     Show-UIOutput -Data $systemData
