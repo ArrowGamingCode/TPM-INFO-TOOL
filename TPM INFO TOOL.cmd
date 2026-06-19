@@ -562,6 +562,39 @@ function Get-TpmToolTypeMessage {
     }
 }
 
+function Get-PCR {
+    param (
+        [string]$HelpText = ""
+    )
+
+    if (Get-TpmisWBCL -HelpText $HelpText) {
+        # Modern WBCL: normalize to "PCR[00] = ..."
+        tpmtool /PCRs | ForEach-Object {
+            if ($_ -match 'PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)') {
+                $pcr = "{0:D2}" -f [int]$matches[1]
+                $digest = ($matches[2] -replace '\s+', '').ToLower()
+                "PCR[$pcr] = $digest"
+            }
+        }
+    }
+    else {
+        tpmtool parsetcglogs | Where-Object { $_ -match '^\s*PCR\[' }
+    }
+}
+
+function Print-PCRTable {
+    param(
+        [string]$parsedTpmToolType
+    )
+
+    Log-Output "`n--- PCR LOGS ---" 'Cyan'
+
+    Get-PCR -HelpText $parsedTpmToolType | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output ""
+}
+
 function Get-BitLockerStatus {
     try {
         $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
@@ -887,6 +920,8 @@ function Show-UIOutput ($Data) {
         }
     }
 	Log-Output ""
+
+	#Print-PCRTable($data.parsedTpmToolType)
 
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
