@@ -550,15 +550,14 @@ function Convert-TpmStringToObject {
     return [PSCustomObject]$tpmProperties
 }
 
-function Get-TpmisWBCL {
+function Get-TpmIsWBCL {
     param (
         [string]$HelpText = ""
     )
 
-    $modernPattern = "/PCRs|/DumpLog|/Output"
-    $legacyPattern = "getdeviceinformation|gatherlogs|parsetcglogs"
+    $tpmtoolPattern = "gatherlogs"
 
-	return $helpText -match $modernPattern
+    return $HelpText -match $tpmtoolPattern
 }
 
 function Get-TpmToolTypeMessage {
