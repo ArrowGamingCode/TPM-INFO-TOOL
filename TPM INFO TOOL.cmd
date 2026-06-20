@@ -153,6 +153,37 @@ function Get-SecureBootStatus {
     }
 }
 
+function Get-SecureBootSetupType {
+    try {
+        $smVar = Get-SecureBootUEFI -Name SetupMode -ErrorAction Stop
+        $byteValue = if ($smVar -and $smVar.PSObject.Properties['Bytes']) { $smVar.Bytes[0] } else { $smVar[0] }
+
+        if ($null -ne $byteValue) {
+            if ($byteValue -eq 1) {
+                return [PSCustomObject]@{
+                    Text   = "Type (Setup Mode)"
+                    Passed = $false
+                }
+            } else {
+                return [PSCustomObject]@{
+                    Text   = "Type (User Mode)"
+                    Passed = $true
+                }
+            }
+        } else {
+            return [PSCustomObject]@{
+                Text   = "Type (Unknown - No Data)"
+                Passed = $false
+            }
+        }
+    } catch {
+        return [PSCustomObject]@{
+            Text   = "Type (Unreadable - $_)"
+            Passed = $false
+        }
+    }
+}
+
 function Get-SecureBootKeysType {
     function Get-SingleKeyType ($KeyName) {
         try {
@@ -578,7 +609,7 @@ function Get-PCR {
         }
     }
     else {
-        tpmtool parsetcglogs | Where-Object { $_ -match '^\s*PCR\[' }
+        tpmtool parsetcglogs | Where-Object { $_ -match '^\|\s*PCR' }
     }
 }
 
@@ -818,7 +849,6 @@ function Show-UIOutput ($Data) {
 	Log-Output "Nvidia ver:   $($Data.NvidiaDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
     Log-Output "BIOS:          $($Data.BiosInfo.String)"
-    Log-Output "Secure Boot:  $($Data.SecureBoot.Text)"
 	Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
@@ -837,7 +867,11 @@ function Show-UIOutput ($Data) {
         Log-Output 'CRITICAL: Bad TPM version. Bios update or key reset required' 'Red'
     }
 
-    if ($Data.SecureBoot.Passed) { Log-Output 'RESULT: Secure Boot Pass' 'Green' } else { Log-Output 'WARNING: Secure Boot is not enabled' 'Yellow' }
+	if ($Data.SecureBoot.Passed -and $Data.SecureBootType.Passed) {
+		Log-Output "RESULT: Secure Boot: $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Green'
+	} else {
+		Log-Output "WARNING: Secure Boot is not enabled. $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Red'
+	}
 
     if ($Data.CsmInfo.Passed) {
         Log-Output "RESULT: BIOS Boot Mode Pass ($($Data.CsmInfo.Text))" 'Green'
@@ -1012,6 +1046,7 @@ function Invoke-MainExecution {
         Mobo           = (Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
         BiosInfo         = Get-BiosCompliance
         SecureBoot     = Get-SecureBootStatus
+		SecureBootType = Get-SecureBootSetupType
         SbKeys         = Get-SecureBootKeysType
         MicrosoftCa    = Get-MicrosoftCaStatus
         CsmInfo        = Get-CsmStatus
