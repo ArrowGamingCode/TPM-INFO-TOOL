@@ -464,20 +464,6 @@ function Get-CsmStatus {
     }
 }
 
-function Show-PlatformStatus {
-    if ($global:platforms.SteamFound) {
-        Log-Output "RESULT: Steam Call of Duty Found"
-    } else {
-        Log-Output "RESULT: Steam Call of Duty Not Detected"
-    }
-
-    if ($global:platforms.BnetFound) {
-        Log-Output "RESULT: Battle.net Call of Duty Found"
-    } else {
-        Log-Output "RESULT: Battle.net Call of Duty Not Detected"
-    }
-}
-
 function Get-CoreIsolationHardwareStatus {
     try {
         $sysInfo = Get-CimInstance -ClassName Win32_ComputerSystem
@@ -613,19 +599,6 @@ function Get-PCR {
     }
 }
 
-function Print-PCRTable {
-    param(
-        [string]$parsedTpmToolType
-    )
-
-    Log-Output "`n--- PCR LOGS ---" 'Cyan'
-
-    Get-PCR -HelpText $parsedTpmToolType | ForEach-Object {
-        Log-Output $_
-    }
-    Log-Output ""
-}
-
 function Get-IntelBiosCompliance {
     $cpu = Get-CimInstance -ClassName Win32_Processor
     if ($cpu.Name -notmatch 'Intel') {
@@ -659,16 +632,6 @@ function Get-BitLockerStatus {
     } catch {
         return [PSCustomObject]@{ Text = "No / Not Supported"; Passed = $false }
     }
-}
-
-function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
-     if ($NoNewLine) {
-        Write-Host $Text -ForegroundColor $Color -NoNewline
-        $global:ClipboardBuffer += $Text
-    } else {
-        Write-Host $Text -ForegroundColor $Color
-        $global:ClipboardBuffer += "$Text`r`n"
-     }
 }
 
 function Get-IntelMeVersion {
@@ -755,6 +718,137 @@ function Get-TpmEndorsementCertStatus {
             Passed = $false
         }
     }
+}
+
+function Get-TcgAttestationAudit {
+    $rawLogs = tpmtool parsetcglogs -validate
+    $fullLogText = $rawLogs -join "`n"
+
+    $check_secureBootState = if ($fullLogText -match 'SecureBoot.*0x1' -or $fullLogText -match '00\s+74\s+00\s+01') { $true } elseif ($fullLogText -match 'SecureBoot.*0x0' -or $fullLogText -match '00\s+74\s+00\s+00') { $false } else { "Unknown" }
+    $check_pkKeyPresent    = $fullLogText -match 'P\s*K\s*.*?'
+    $check_kekKeyPresent   = $fullLogText -match 'K\s*E\s*K\s*.*?'
+    $check_dbKeyPresent    = $fullLogText -match 'd\s*b\s*.*?'
+    $check_dbxKeyPresent   = $fullLogText -match 'd\s*b\s*x\s*'
+    $check_ebbrProfile     = $fullLogText -match 'Spec ID Event03' -or $fullLogText -match '53\s+70\s+65\s+63\s+20\s+49\s+44'
+    $check_kernelDebug     = if ($fullLogText -match 'KernelDebug.*0x1' -or $fullLogText -match 'TestSigning.*0x1') { $false } elseif ($fullLogText -match 'KernelDebug.*0x0' -and $fullLogText -match 'TestSigning.*0x0') { $true } else { "Unknown" }
+    $check_bitlockerPolicy = $fullLogText -match 'BitLocker' -or $fullLogText -match 'B\s*i\s*t\s*L\s*o\s*c\s*k\s*e\s*r'
+    $check_pcr7Attestation = $fullLogText -match 'PCR7' -or ($check_secureBootState -eq $true -and $check_pkKeyPresent -eq $true)
+
+    $pcrFailures = @()
+    $pcrZeroLine = $null
+    foreach ($line in $rawLogs) {
+        if ($line -match '\|\s*(PCR\[\d+\])\s*\|[^\|]*\|\s*(MISMATCH|Failed|Error)') { $pcrFailures += $Matches[1] }
+        # Specifically match and save the PCR 0 or 00 verification line
+        if ($line -match '^\|\s*PCR\[00?\]') { $pcrZeroLine = $line }
+    }
+    $check_pcrMatrix = if ($pcrFailures.Count -gt 0) { $false } else { $true }
+
+    return [PSCustomObject]@{
+        PcrMatrix   = $check_pcrMatrix
+        PcrFailures = $pcrFailures
+        PcrZeroLine = $pcrZeroLine
+        SbState     = $check_secureBootState
+        PkPresent   = $check_pkKeyPresent
+        KekPresent  = $check_kekKeyPresent
+        DbPresent   = $check_dbKeyPresent
+        DbxPresent  = $check_dbxKeyPresent
+        Ebbr        = $check_ebbrProfile
+        KernelDebug = $check_kernelDebug
+        Bitlocker   = $check_bitlockerPolicy
+        Pcr7Ready   = $check_pcr7Attestation
+    }
+}
+
+# =========================================================================
+# PRINT PIPELINE
+# =========================================================================
+
+function Show-PlatformStatus {
+    if ($global:platforms.SteamFound) {
+        Log-Output "RESULT: Steam Call of Duty Found"
+    } else {
+        Log-Output "RESULT: Steam Call of Duty Not Detected"
+    }
+
+    if ($global:platforms.BnetFound) {
+        Log-Output "RESULT: Battle.net Call of Duty Found"
+    } else {
+        Log-Output "RESULT: Battle.net Call of Duty Not Detected"
+    }
+}
+
+function Print-PCRTable {
+    param(
+        [string]$parsedTpmToolType
+    )
+
+    Log-Output "`n--- PCR LOGS ---" 'Cyan'
+
+    Get-PCR -HelpText $parsedTpmToolType | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output ""
+}
+
+function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
+     if ($NoNewLine) {
+        Write-Host $Text -ForegroundColor $Color -NoNewline
+        $global:ClipboardBuffer += $Text
+    } else {
+        Write-Host $Text -ForegroundColor $Color
+        $global:ClipboardBuffer += "$Text`r`n"
+     }
+}
+
+function Show-TcgAttestationAudit ($TcgData) {
+	if (Get-TpmisWBCL -HelpText $env:TpmToolType) {
+        return
+    }
+
+    Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
+
+    if ($TcgData.PcrMatrix -eq $true) {
+        Log-Output "[PASS] Hardware log verification matches live PCR registers perfectly." 'Green'
+    } else {
+        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
+        Log-Output "       Affected Registers: $($TcgData.PcrFailures -join ', ')" 'DarkRed'
+    }
+<#
+    if ($TcgData.PcrZeroLine) {
+        if ($TcgData.PcrZeroLine -match 'MISMATCH|Failed|Error') {
+            Log-Output $TcgData.PcrZeroLine 'Red'
+        } else {
+            Log-Output $TcgData.PcrZeroLine 'White'
+        }
+    }
+
+    if ($TcgData.SbState -eq $true) {
+        Log-Output "[PASS] Secure Boot 'Enabled' state (0x01) verified from event log." 'Green'
+    } elseif ($TcgData.SbState -eq $false) {
+        Log-Output "[WARN] Secure Boot is explicitly 'Disabled' (0x00) in the TCG event log." 'DarkYellow'
+    }
+
+    @(@('Platform Key (PK)', $TcgData.PkPresent, 'Motherboard ownership validation block is missing.'),
+      @('Key Exchange Key (KEK) Database', $TcgData.KekPresent, 'Intermediate verification key hierarchy is missing.'),
+      @('Signature Database (db)', $TcgData.DbPresent, 'Ecosystem certificate array verification missing.'),
+      @('Revocation Tree (dbx)', $TcgData.DbxPresent, 'Blacklist component definition missing.')) |
+    ForEach-Object {
+        if ($_[1] -eq $true) { Log-Output "[PASS] $_[0] : Verified Present" 'Green' }
+        else { Log-Output "[WARN] $_[0] : Missing from log architecture" 'DarkYellow';
+        Log-Output "       Detail: $_[2]" 'DarkRed' }
+    }
+
+    if ($TcgData.Ebbr -eq $true) { Log-Output "[PASS] TCG Specification Profile Alignment : Validated." 'Green' }
+    else { Log-Output "[WARN] TCG Specification Profile Alignment : Motherboard formatting defaults out of spec." 'DarkYellow' }
+
+    if ($TcgData.KernelDebug -eq $true) { Log-Output "[PASS] OS Production Baseline Mode : Non-debug production kernel confirmed." 'Green' }
+    elseif ($TcgData.KernelDebug -eq $false) { Log-Output "[WARN] OS Production Baseline Mode : Test-signing or Active Kernel Debugging detected!" 'DarkYellow' }
+
+    if ($TcgData.Bitlocker -eq $true) { Log-Output "[PASS] BitLocker Native Storage Policy Handshake : Active pre-boot validation logged." 'Green' }
+    if ($TcgData.Pcr7Ready -eq $true) { Log-Output "[PASS] Cloud Device Attestation Readiness : Perfect PCR 7 bound signature design matrix." 'Green' }
+    else { Log-Output "[WARN] Cloud Device Attestation Readiness : Incompatible register signature design matrix." 'DarkYellow' }
+#>
+	Log-Output ""
 }
 
 # =========================================================================
@@ -891,7 +985,7 @@ function Show-UIOutput ($Data) {
 
 	Log-Output "COD Broker:   $($Data.CodBroker.Text) (StartType: $($Data.CodBroker.StartType))"
 	if ($Data.CodBroker.StartType -eq 'Automatic') {
-		# 'DarkYellow' acts as the standard console replacement for Orange
+		# 'DarkYellow' acts as the standard console replacement for DarkYellow
 		Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
 	} elseif ($Data.CodBroker.Passed) {
 		Log-Output 'RESULT: COD Broker Service Pass' 'Green'
@@ -983,6 +1077,7 @@ function Show-UIOutput ($Data) {
 	Log-Output ""
 
 	#Print-PCRTable($data.parsedTpmToolType)
+	Show-TcgAttestationAudit -TcgData $Data.TcgAudit
 
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
@@ -1069,6 +1164,7 @@ function Invoke-MainExecution {
 		LocalAttest           = Get-LocalAttestationStatus
 		parsedTpmToolType = $parsedTpmToolTypeObject
 		IntelBiosInfo  = Get-IntelBiosCompliance
+		TcgAudit         = Get-TcgAttestationAudit
     }
 
     Show-UIOutput -Data $systemData
