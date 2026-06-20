@@ -938,7 +938,7 @@ function Show-UIOutput ($Data) {
 
     Log-Output 'TPM INFO TOOL - 1.0.1'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
-    Log-Output "OS:           $((Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').ProductName)"
+    Log-Output "OS:           $($Data.currentOS)  - (Original Install: $($Data.OriginalOSBuild))"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
 	Log-Output "Nvidia ver:   $($Data.NvidiaDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
@@ -1068,7 +1068,8 @@ function Show-UIOutput ($Data) {
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
 	Log-Output $data.parsedTpmToolType
-    $exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version'
+	$exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
+			   'Lockout Counter', 'Max Auth Fail', 'Lockout Interval', 'Lockout Recovery'
     foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
         if ($prop.Name -notin $exclude) {
             Log-Output ("{0,-30}: {1}" -f $prop.Name, $prop.Value)
@@ -1165,6 +1166,7 @@ function Invoke-MainExecution {
 		parsedTpmToolType = $parsedTpmToolTypeObject
 		IntelBiosInfo  = Get-IntelBiosCompliance
 		TcgAudit         = Get-TcgAttestationAudit
+		CurrentOS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
     }
 
     Show-UIOutput -Data $systemData
