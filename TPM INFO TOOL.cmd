@@ -555,9 +555,7 @@ function Get-TpmIsWBCL {
         [string]$HelpText = ""
     )
 
-    $tpmtoolPattern = "gatherlogs"
-
-    return $HelpText -match $tpmtoolPattern
+    return $HelpText -notmatch "parsetcglogs"
 }
 
 function Get-TpmToolTypeMessage {
@@ -565,36 +563,67 @@ function Get-TpmToolTypeMessage {
         [string]$HelpText = ""
     )
 
-    $legacyPattern = "getdeviceinformation|gatherlogs|parsetcglogs"
-
-    if (Get-TpmisWBCL($HelpText)) {
+    if (Get-TpmIsWBCL -HelpText $HelpText){
         return "TPM Tool (Modern WBCL logs)"
     }
-    elseif ($HelpText -match $legacyPattern) {
-        return "TPM Tool (Classic TCG logs)"
-    }
     else {
-        return "Unknown if TCG or WBCL"
+        return "TPM Tool (Classic TCG logs)"
     }
 }
 
 function Get-PCR {
-    param (
-        [string]$HelpText = ""
-    )
+    if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
+        $tcgLogValues = [ordered]@{}
+        $hardwareValues = [ordered]@{}
+        $currentSection = $null
 
-    if (Get-TpmisWBCL -HelpText $HelpText) {
-        # Modern WBCL: normalize to "PCR[00] = ..."
-        tpmtool /PCRs | ForEach-Object {
-            if ($_ -match 'PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)') {
+        tpmtool printpcr sha256 | ForEach-Object {
+            $line = $_.Trim()
+
+            if ($line -eq "TCG Log Value:") {
+                $currentSection = "TCG"
+                return # Skip to next line
+            }
+            elseif ($line -eq "Hardware Value:") {
+                $currentSection = "Hardware"
+                return # Skip to next line
+            }
+
+            if ($line -match 'PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)') {
                 $pcr = "{0:D2}" -f [int]$matches[1]
                 $digest = ($matches[2] -replace '\s+', '').ToLower()
-                "PCR[$pcr] = $digest"
+
+                if ($currentSection -eq "TCG") {
+                    $tcgLogValues[$pcr] = $digest
+                }
+                elseif ($currentSection -eq "Hardware") {
+                    $hardwareValues[$pcr] = $digest
+                }
             }
+        }
+
+        foreach ($pcr in $tcgLogValues.Keys) {
+            $tcgVal = $tcgLogValues[$pcr]
+            $hwVal  = $hardwareValues[$pcr]
+
+            if ($null -eq $hwVal) {
+                $status = "MISSING HW"
+            }
+            elseif ($tcgVal -eq $hwVal) {
+                $status = "MATCH!"
+            }
+            else {
+                $status = "MISMATCH!"
+            }
+
+            # Stripped the | from the very front and very back
+            "PCR[$pcr] |  $tcgVal  |  $status"
         }
     }
     else {
-        tpmtool parsetcglogs | Where-Object { $_ -match '^\|\s*PCR' }
+       tpmtool parsetcglogs -validate |
+         Where-Object { $_ -match '^\|\s*PCR' } |
+         ForEach-Object { $_.Trim(" |!`r`n") }
     }
 }
 
@@ -734,18 +763,9 @@ function Get-TcgAttestationAudit {
     $check_pcr7Attestation = $fullLogText -match 'PCR7' -or ($check_secureBootState -eq $true -and $check_pkKeyPresent -eq $true)
 
     $pcrFailures = @()
-    $pcrZeroLine = $null
-    foreach ($line in $rawLogs) {
-        if ($line -match '\|\s*(PCR\[\d+\])\s*\|[^\|]*\|\s*(MISMATCH|Failed|Error)') { $pcrFailures += $Matches[1] }
-        # Specifically match and save the PCR 0 or 00 verification line
-        if ($line -match '^\|\s*PCR\[00?\]') { $pcrZeroLine = $line }
-    }
-    $check_pcrMatrix = if ($pcrFailures.Count -gt 0) { $false } else { $true }
 
     return [PSCustomObject]@{
-        PcrMatrix   = $check_pcrMatrix
         PcrFailures = $pcrFailures
-        PcrZeroLine = $pcrZeroLine
         SbState     = $check_secureBootState
         PkPresent   = $check_pkKeyPresent
         KekPresent  = $check_kekKeyPresent
@@ -777,13 +797,9 @@ function Show-PlatformStatus {
 }
 
 function Print-PCRTable {
-    param(
-        [string]$parsedTpmToolType
-    )
-
     Log-Output "`n--- PCR LOGS ---" 'Cyan'
 
-    Get-PCR -HelpText $parsedTpmToolType | ForEach-Object {
+    Get-PCR | ForEach-Object {
         Log-Output $_
     }
     Log-Output ""
@@ -799,28 +815,49 @@ function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
      }
 }
 
-function Show-TcgAttestationAudit ($TcgData) {
-	if (Get-TpmisWBCL -HelpText $env:TpmToolType) {
-        return
-    }
+function Show-PCR_Message() {
+    $HasFailures = $false
+    $FailedRegisters = @()
 
-    Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
+    Get-PCR | ForEach-Object {
+        if ($_ -match 'PCR\[(?<num>\d+)\]') {
+            $pcrNum = $Matches['num']
+            if ($_ -match 'MISMATCH|Failed|Error') {
+                $HasFailures = $true
+                $FailedRegisters += "PCR[$pcrNum]"
+            }
+        }
 
-    if ($TcgData.PcrMatrix -eq $true) {
-        Log-Output "[PASS] Hardware log verification matches live PCR registers perfectly." 'Green'
-    } else {
-        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
-        Log-Output "       Affected Registers: $($TcgData.PcrFailures -join ', ')" 'DarkRed'
-    }
-<#
-    if ($TcgData.PcrZeroLine) {
-        if ($TcgData.PcrZeroLine -match 'MISMATCH|Failed|Error') {
-            Log-Output $TcgData.PcrZeroLine 'Red'
-        } else {
-            Log-Output $TcgData.PcrZeroLine 'White'
+        if ($_ -match 'PCR\[00?\]') {
+            # Clean up raw pipes and spacing formatting
+            $CleanedLine = $_.Trim(" |!`r`n")
+
+            if ($CleanedLine -match 'MISMATCH|Failed|Error') {
+                Log-Output $CleanedLine 'Red'
+            } else {
+                Log-Output $CleanedLine 'White'
+            }
         }
     }
 
+    if ($HasFailures -eq $false) {
+        Log-Output "[PASS] Hardware log verification matches live PCR registers." 'Green'
+    } else {
+        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
+        Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
+    }
+}
+
+function Show-TcgAttestationAudit ($TcgData) {
+    Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
+
+	Show-PCR_Message
+
+	if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
+        return
+    }
+
+<#
     if ($TcgData.SbState -eq $true) {
         Log-Output "[PASS] Secure Boot 'Enabled' state (0x01) verified from event log." 'Green'
     } elseif ($TcgData.SbState -eq $false) {
