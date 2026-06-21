@@ -961,16 +961,40 @@ function Show-Banner ($enrollSuccess, $criticalHardwarePass, [switch]$ConsoleOnl
     if ($enrollSuccess -and $criticalHardwarePass) {
         $statusText = "PASS"
         $color      = "Green"
-        $padding    = if ($ConsoleOnly) { " " * 28 } else { " " * 28 }
+        $padding    = " " * 17
     } else {
         $statusText = "FAIL"
         $color      = "Red"
-        $padding    = if ($ConsoleOnly) { " " * 26 } else { " " * 26 }
+        $padding    = " " * 17
     }
 
     &$LogCmd "=========================================================================" 'Cyan'
     &$LogCmd "| $padding [ OVERALL: TPM Attestation $statusText ] $padding |" $color
+    PrintLargeOverallResult $statusText
     &$LogCmd "=========================================================================" 'Cyan'
+}
+
+function PrintLargeOverallResult ($result) {
+	Write-Host "=========================================================================" -ForegroundColor Blue
+    if ($result -eq 'PASS') {
+        $ascii = @'
+  ____    _    ____ ____  
+ |  _ \  / \  / ___/ ___| 
+ | |_) |/ _ \ \___ \___ \ 
+ |  __/ ___ \ ___) |___) |
+ |_| /_/   \_\____/|____/ 
+'@
+        Write-Host $ascii -ForegroundColor Green
+    } else {
+        $ascii = @'
+  _____ _   ___ _     
+ |  ___/ \ |_ _| |    
+ | |_ / _ \ | || |    
+ |  _/ ___ \| || |___ 
+ |_|/_/   \_\___|_____|
+'@
+        Write-Host $ascii -ForegroundColor Red
+    }
 }
 
 function Show-UIOutput ($Data) {
