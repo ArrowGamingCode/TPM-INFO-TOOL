@@ -36,12 +36,9 @@ exit /b
 :CollapseCommandOutput
 set "varName=%~1"
 set "command=%~2"
-
-:: Clear the variable dynamically
 set "%varName%="
 
 for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
-    :: FIX: Cleaned up the dynamic assignment syntax to heavily insulate special characters
     if "!%varName%!"=="" (
         set "%varName%=%%A"
     ) else (
@@ -57,10 +54,18 @@ goto :eof
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
+$global:ProgressStep = 0
+$global:TotalSteps   = 40
 
 # =========================================================================
 # FUNCTIONS
 # =========================================================================
+
+function Step-Progress {
+    $global:ProgressStep++
+    $PercentComplete = [math]::Min(100, [int](($global:ProgressStep / $global:TotalSteps) * 100))
+    Write-Progress -Activity "Loading System Diagnostics" -Status "Progress: $PercentComplete%" -PercentComplete $PercentComplete
+}
 
 function Get-CpuCompliance {
     $cpu = Get-CimInstance -ClassName Win32_Processor
@@ -845,7 +850,6 @@ function Show-PCR_Message() {
         }
 
         if ($_ -match 'PCR\[00?\]') {
-            # Clean up raw pipes and spacing formatting
             $CleanedLine = $_.Trim(" |!`r`n")
 
             if ($CleanedLine -match 'MISMATCH|Failed|Error') {
@@ -970,11 +974,13 @@ function Show-Banner ($enrollSuccess, $criticalHardwarePass, [switch]$ConsoleOnl
 }
 
 function Show-UIOutput ($Data) {
+	Step-Progress
     if ($TestFile -and (Test-Path $TestFile)) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
         $certRaw = certreq -enrollaik -config '""' 2>&1 | Out-String
     }
+	Write-Progress -Activity "Loading System Diagnostics" -Completed
 
     $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
 	$enrollSuccess = $certRaw -match $successPatterns
@@ -988,7 +994,7 @@ function Show-UIOutput ($Data) {
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
-    Log-Output 'TPM INFO TOOL - 1.0.1'
+    Log-Output 'TPM INFO TOOL - 1.0.2'
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $($Data.currentOS)  - (Original Install: $($Data.OriginalOSBuild))"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
@@ -1188,38 +1194,38 @@ function Invoke-MainExecution {
 	$parsedTpmToolTypeObject = Get-TpmToolTypeMessage -HelpText $env:TpmToolType
 
     $systemData = [PSCustomObject]@{
-        CpuInfo        = Get-CpuCompliance
-		NvidiaDriver   = Get-NvidiaDriverVersion
-		AmdDriver      = Get-AmdDriverVersion
-        RamSlots       = Get-RamDetails
-        Mobo           = (Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
-        BiosInfo         = Get-BiosCompliance
-        SecureBoot     = Get-SecureBootStatus
-		SecureBootType = Get-SecureBootSetupType
-        SbKeys         = Get-SecureBootKeysType
-        MicrosoftCa    = Get-MicrosoftCaStatus
-        CsmInfo        = Get-CsmStatus
-        TpmInfo        = Get-TpmStatus
-        TpmOwnership    = Get-TpmOwnershipState
-        ActivisionKey  = Get-ActivisionKeyStatus
-        CodBroker       = Get-CodBrokerStatus
-        Randgrid       = Get-randgridRegistryAndDriverInfo
-        XboxRandgrid   = Get-XboxRandgridInfo
-        BrokerExe      = Test-Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe'
-        BatteryInfo    = Get-BatteryStatus
-        PartitionStyle = Get-DiskPartitionStyle
-        CoreIsolation  = Get-CoreIsolationHardwareStatus
-		IntelMeVersion = Get-IntelMeVersion
-		TpmEndorsement = Get-TpmEndorsementCertStatus
-		OriginalOSBuild = $originalOS
-        DaysSinceInstall = [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays)
-		BitLocker      = Get-BitLockerStatus
-		ExtendedTpmProperties = $parsedTpmObject
-		LocalAttest           = Get-LocalAttestationStatus
-		parsedTpmToolType = $parsedTpmToolTypeObject
-		IntelBiosInfo  = Get-IntelBiosCompliance
-		TcgAudit         = Get-TcgAttestationAudit
-		CurrentOS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
+		CpuInfo               = $(Step-Progress; Get-CpuCompliance)
+		NvidiaDriver          = $(Step-Progress; Get-NvidiaDriverVersion)
+		AmdDriver             = $(Step-Progress; Get-AmdDriverVersion)
+		RamSlots              = $(Step-Progress; Get-RamDetails)
+		Mobo                  = $(Step-Progress; Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
+		BiosInfo              = $(Step-Progress; Get-BiosCompliance)
+		SecureBoot            = $(Step-Progress; Get-SecureBootStatus)
+		SecureBootType        = $(Step-Progress; Get-SecureBootSetupType)
+		SbKeys                = $(Step-Progress; Get-SecureBootKeysType)
+		MicrosoftCa           = $(Step-Progress; Get-MicrosoftCaStatus)
+		CsmInfo               = $(Step-Progress; Get-CsmStatus)
+		TpmInfo               = $(Step-Progress; Get-TpmStatus)
+		TpmOwnership          = $(Step-Progress; Get-TpmOwnershipState)
+		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
+		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
+		Randgrid              = $(Step-Progress; Get-randgridRegistryAndDriverInfo)
+		XboxRandgrid          = $(Step-Progress; Get-XboxRandgridInfo)
+		BrokerExe             = $(Step-Progress; Test-Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe')
+		BatteryInfo           = $(Step-Progress; Get-BatteryStatus)
+		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
+		CoreIsolation         = $(Step-Progress; Get-CoreIsolationHardwareStatus)
+		IntelMeVersion        = $(Step-Progress; Get-IntelMeVersion)
+		TpmEndorsement        = $(Step-Progress; Get-TpmEndorsementCertStatus)
+		OriginalOSBuild       = $(Step-Progress; $originalOS)
+		DaysSinceInstall      = $(Step-Progress; [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays))
+		BitLocker             = $(Step-Progress; Get-BitLockerStatus)
+		ExtendedTpmProperties = $(Step-Progress; $parsedTpmObject)
+		LocalAttest           = $(Step-Progress; Get-LocalAttestationStatus)
+		parsedTpmToolType     = $(Step-Progress; $parsedTpmToolTypeObject)
+		IntelBiosInfo         = $(Step-Progress; Get-IntelBiosCompliance)
+		TcgAudit              = $(Step-Progress; Get-TcgAttestationAudit)
+		CurrentOS             = $(Step-Progress; (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
     }
 
     Show-UIOutput -Data $systemData
