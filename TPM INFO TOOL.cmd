@@ -720,6 +720,22 @@ function Get-NvidiaDriverVersion {
     }
 }
 
+function Get-AmdDriverVersion {
+    try {
+        $gpu = Get-CimInstance -ClassName Win32_VideoController |
+               Where-Object { $_.Name -like "*AMD*" -or $_.Name -like "*Radeon*" } |
+               Select-Object -First 1
+
+        if ($gpu -and $gpu.DriverVersion) {
+            return $gpu.DriverVersion
+        } else {
+            return "Not Detected"
+        }
+    } catch {
+        return "Error Querying"
+    }
+}
+
 function Get-TpmEndorsementCertStatus {
     try {
         $TpmInfo = Get-TpmEndorsementKeyInfo -HashAlgorithm SHA256 -ErrorAction Stop
@@ -976,7 +992,7 @@ function Show-UIOutput ($Data) {
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $($Data.currentOS)  - (Original Install: $($Data.OriginalOSBuild))"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
-	Log-Output "Nvidia ver:   $($Data.NvidiaDriver)"
+	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
     Log-Output "BIOS:          $($Data.BiosInfo.String)"
 	Log-Output "RAM Type:     $($Data.RamSlots)"
@@ -1174,6 +1190,7 @@ function Invoke-MainExecution {
     $systemData = [PSCustomObject]@{
         CpuInfo        = Get-CpuCompliance
 		NvidiaDriver   = Get-NvidiaDriverVersion
+		AmdDriver      = Get-AmdDriverVersion
         RamSlots       = Get-RamDetails
         Mobo           = (Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
         BiosInfo         = Get-BiosCompliance
