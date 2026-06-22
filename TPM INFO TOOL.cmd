@@ -55,7 +55,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 42
+$global:TotalSteps   = 44
 
 # =========================================================================
 # FUNCTIONS
@@ -101,7 +101,6 @@ function Get-BatteryStatus {
 }
 
 function Get-RamDetails {
-    # Grabs only the very first RAM stick object
     $ram = Get-CimInstance -ClassName Win32_PhysicalMemory | Select-Object -First 1
 
     if ($ram) {
@@ -314,7 +313,6 @@ function Get-TpmOwnershipState {
 
 function Get-ActivisionKeyStatus {
     try {
-        # Check crypto keys without using error pipelines that break execution blocks
         $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1 | Out-String
         if ($keys -match "ActivisionAIK") {
             return "Found"
@@ -587,11 +585,11 @@ function Get-PCR {
 
             if ($line -eq "TCG Log Value:") {
                 $currentSection = "TCG"
-                return # Skip to next line
+                return
             }
             elseif ($line -eq "Hardware Value:") {
                 $currentSection = "Hardware"
-                return # Skip to next line
+                return
             }
 
             if ($line -match 'PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)') {
@@ -621,7 +619,6 @@ function Get-PCR {
                 $status = "MISMATCH!"
             }
 
-            # Stripped the | from the very front and very back
             "PCR[$pcr] |  $tcgVal  |  $status"
         }
     }
@@ -777,6 +774,22 @@ function Get-WindowsSubVersion {
     return (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").DisplayVersion
 }
 
+function Get-PcModel {
+    try {
+        $system = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+        if ($system) {
+            $manufacturer = $system.Manufacturer.Trim()
+            $model = $system.Model.Trim()
+
+            return "{0} {1}" -f $manufacturer, $model
+        } else {
+            return "Unknown System"
+        }
+    } catch {
+        return "Error Querying PC Model"
+    }
+}
+
 function Get-TcgAttestationAudit {
     $rawLogs = tpmtool parsetcglogs -validate
     $fullLogText = $rawLogs -join "`n"
@@ -892,9 +905,6 @@ function Get-Win10SupportStatus {
         return "False"
     }
 }
-
-# Run it
-Get-Win10SupportStatus
 
 function Show-TcgAttestationAudit ($TcgData) {
     Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
@@ -1051,6 +1061,7 @@ function Show-UIOutput ($Data) {
     Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild)) - Supported: $($Data.OSSupported)"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
 	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
+	Log-Output "PC Model:     $($Data.PcModel)"
     Log-Output "Motherboard:  $($Data.Mobo)"
     Log-Output "BIOS:          $($Data.BiosInfo.String)"
 	Log-Output "RAM Type:     $($Data.RamSlots)"
@@ -1095,7 +1106,6 @@ function Show-UIOutput ($Data) {
 
 	Log-Output "COD Broker:   $($Data.CodBroker.Text) (StartType: $($Data.CodBroker.StartType))"
 	if ($Data.CodBroker.StartType -eq 'Automatic') {
-		# 'DarkYellow' acts as the standard console replacement for DarkYellow
 		Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
 	} elseif ($Data.CodBroker.Passed) {
 		Log-Output 'RESULT: COD Broker Service Pass' 'Green'
@@ -1214,7 +1224,6 @@ function Show-UIOutput ($Data) {
         }
     }
 
-    # Direct string pipeline allocation straight to windows clipboard
     $global:ClipboardBuffer | Set-Clipboard
     Write-Host "`nAll information has been copied to your clipboard ready to paste into a forum!" -ForegroundColor Cyan
 }
@@ -1281,12 +1290,12 @@ function Invoke-MainExecution {
 		PowerShellVer		  = $(Step-Progress; Get-PowerShellVersion)
 		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
 		OSSupported           = $(Step-Progress; Get-Win10SupportStatus)
+		PcModel               = $(Step-Progress; Get-PcModel)
     }
 
     Show-UIOutput -Data $systemData
 	return $systemData
 }
 
-# Run the pipeline
 $Data = Invoke-MainExecution
 Show-UserRecommendedSteps -Data $Data
