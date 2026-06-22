@@ -1198,7 +1198,7 @@ function Show-UIOutput ($Data) {
         }catch { }
     }
 
-	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days. Original Install OS: $($Data.OriginalOSBuild)"
+	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days"
 	if ($Data.BitLocker.Passed) {
         Log-Output "BitLocker Enabled: Yes" 'Red'
     } else {
