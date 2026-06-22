@@ -55,7 +55,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 40
+$global:TotalSteps   = 42
 
 # =========================================================================
 # FUNCTIONS
@@ -769,6 +769,14 @@ function Get-TpmEndorsementCertStatus {
     }
 }
 
+function Get-PowerShellVersion {
+    return $PSVersionTable.PSVersion.ToString()
+}
+
+function Get-WindowsSubVersion {
+    return (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").DisplayVersion
+}
+
 function Get-TcgAttestationAudit {
     $rawLogs = tpmtool parsetcglogs -validate
     $fullLogText = $rawLogs -join "`n"
@@ -1018,9 +1026,9 @@ function Show-UIOutput ($Data) {
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
-    Log-Output 'TPM INFO TOOL - 1.0.2'
+    Log-Output "TPM INFO TOOL - 1.0.2  - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
-    Log-Output "OS:           $($Data.currentOS)  - (Original Install: $($Data.OriginalOSBuild))"
+    Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild))"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
 	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
@@ -1250,6 +1258,8 @@ function Invoke-MainExecution {
 		IntelBiosInfo         = $(Step-Progress; Get-IntelBiosCompliance)
 		TcgAudit              = $(Step-Progress; Get-TcgAttestationAudit)
 		CurrentOS             = $(Step-Progress; (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
+		PowerShellVer		  = $(Step-Progress; Get-PowerShellVersion)
+		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
     }
 
     Show-UIOutput -Data $systemData
