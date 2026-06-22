@@ -794,20 +794,49 @@ function Get-PcModel {
 }
 
 function Get-TcgAttestationAudit {
-    $rawLogs = tpmtool parsetcglogs -validate
-    $fullLogText = $rawLogs -join "`n"
+    $rawLogs = $null
 
-    $check_secureBootState = if ($fullLogText -match 'SecureBoot.*0x1' -or $fullLogText -match '00\s+74\s+00\s+01') { $true } elseif ($fullLogText -match 'SecureBoot.*0x0' -or $fullLogText -match '00\s+74\s+00\s+00') { $false } else { "Unknown" }
-    $check_pkKeyPresent    = $fullLogText -match 'P\s*K\s*.*?'
-    $check_kekKeyPresent   = $fullLogText -match 'K\s*E\s*K\s*.*?'
-    $check_dbKeyPresent    = $fullLogText -match 'd\s*b\s*.*?'
-    $check_dbxKeyPresent   = $fullLogText -match 'd\s*b\s*x\s*'
-    $check_ebbrProfile     = $fullLogText -match 'Spec ID Event03' -or $fullLogText -match '53\s+70\s+65\s+63\s+20\s+49\s+44'
-    $check_kernelDebug     = if ($fullLogText -match 'KernelDebug.*0x1' -or $fullLogText -match 'TestSigning.*0x1') { $false } elseif ($fullLogText -match 'KernelDebug.*0x0' -and $fullLogText -match 'TestSigning.*0x0') { $true } else { "Unknown" }
-    $check_bitlockerPolicy = $fullLogText -match 'BitLocker' -or $fullLogText -match 'B\s*i\s*t\s*L\s*o\s*c\s*k\s*e\s*r'
-    $check_pcr7Attestation = $fullLogText -match 'PCR7' -or ($check_secureBootState -eq $true -and $check_pkKeyPresent -eq $true)
+	if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
+        $measuredBootPath = "$env:SystemRoot\Logs\MeasuredBoot"
 
-    $pcrFailures = @()
+        if (Test-Path $measuredBootPath) {
+            $latestLog = Get-ChildItem -Path $measuredBootPath -Filter "*.log" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1
+
+            if ($latestLog) {
+                $rawLogs = tpmtool parsetcglogs -path $latestLog.FullName -validate -ErrorAction Stop
+            }
+        }
+    }else{
+		$rawLogs = tpmtool parsetcglogs -validate
+	}
+
+    if ($rawLogs) {
+        $fullLogText = if ($rawLogs -is [array]) { $rawLogs -join "`n" } else { $rawLogs }
+
+        $check_secureBootState = if ($fullLogText -match 'SecureBoot.*0x1' -or $fullLogText -match '00\s+74\s+00\s+01') { $true } elseif ($fullLogText -match 'SecureBoot.*0x0' -or $fullLogText -match '00\s+74\s+00\s+00') { $false } else { "Unknown" }
+        $check_pkKeyPresent    = $fullLogText -match 'P\s*K\s*.*?'
+        $check_kekKeyPresent   = $fullLogText -match 'K\s*E\s*K\s*.*?'
+        $check_dbKeyPresent    = $fullLogText -match 'd\s*b\s*.*?'
+        $check_dbxKeyPresent   = $fullLogText -match 'd\s*b\s*x\s*'
+        $check_ebbrProfile     = $fullLogText -match 'Spec ID Event03' -or $fullLogText -match '53\s+70\s+65\s+63\s+20\s+49\s+44'
+        $check_kernelDebug     = if ($fullLogText -match 'KernelDebug.*0x1' -or $fullLogText -match 'TestSigning.*0x1') { $false } elseif ($fullLogText -match 'KernelDebug.*0x0' -and $fullLogText -match 'TestSigning.*0x0') { $true } else { "Unknown" }
+        $check_bitlockerPolicy = $fullLogText -match 'BitLocker' -or $fullLogText -match 'B\s*i\s*t\s*L\s*o\s*c\s*k\s*e\s*r'
+        $check_pcr7Attestation = $fullLogText -match 'PCR7' -or ($check_secureBootState -eq $true -and $check_pkKeyPresent -eq $true)
+        $pcrFailures           = @()
+    } else {
+        $check_secureBootState = "unreadable"
+        $check_pkKeyPresent    = $false
+        $check_kekKeyPresent   = $false
+        $check_dbKeyPresent    = $false
+        $check_dbxKeyPresent   = $false
+        $check_ebbrProfile     = $false
+        $check_kernelDebug     = "unreadable"
+        $check_bitlockerPolicy = $false
+        $check_pcr7Attestation = $false
+        $pcrFailures           = @("unreadable")
+    }
 
     return [PSCustomObject]@{
         PcrFailures = $pcrFailures
@@ -820,6 +849,7 @@ function Get-TcgAttestationAudit {
         KernelDebug = $check_kernelDebug
         Bitlocker   = $check_bitlockerPolicy
         Pcr7Ready   = $check_pcr7Attestation
+        LogStatus   = $isFallback
     }
 }
 
@@ -914,37 +944,35 @@ function Show-TcgAttestationAudit ($TcgData) {
 
 	Show-PCR_Message
 
-	if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
-        return
-    }
+	return
+	#Below code still in dev
 
-<#
     if ($TcgData.SbState -eq $true) {
-        Log-Output "[PASS] Secure Boot 'Enabled' state (0x01) verified from event log." 'Green'
+        Log-Output "[PASS] Secure Boot state (0x01)" 'Green'
     } elseif ($TcgData.SbState -eq $false) {
-        Log-Output "[WARN] Secure Boot is explicitly 'Disabled' (0x00) in the TCG event log." 'DarkYellow'
+        Log-Output "[INFO] Secure Boot state (0x00)" 'DarkYellow'
     }
 
-    @(@('Platform Key (PK)', $TcgData.PkPresent, 'Motherboard ownership validation block is missing.'),
-      @('Key Exchange Key (KEK) Database', $TcgData.KekPresent, 'Intermediate verification key hierarchy is missing.'),
-      @('Signature Database (db)', $TcgData.DbPresent, 'Ecosystem certificate array verification missing.'),
-      @('Revocation Tree (dbx)', $TcgData.DbxPresent, 'Blacklist component definition missing.')) |
+    @(@('Platform Key', $TcgData.PkPresent, ''),
+      @('Key Exchange Key DB', $TcgData.KekPresent, ''),
+      @('Signature DB', $TcgData.DbPresent, ''),
+      @('Revocation Tree', $TcgData.DbxPresent, '')) |
     ForEach-Object {
-        if ($_[1] -eq $true) { Log-Output "[PASS] $_[0] : Verified Present" 'Green' }
-        else { Log-Output "[WARN] $_[0] : Missing from log architecture" 'DarkYellow';
+        if ($_[1] -eq $true) { Log-Output "[PASS] $_" 'Green' }
+        else { Log-Output "[INFO] $_[0] : " 'DarkYellow';
         Log-Output "       Detail: $_[2]" 'DarkRed' }
     }
 
-    if ($TcgData.Ebbr -eq $true) { Log-Output "[PASS] TCG Specification Profile Alignment : Validated." 'Green' }
-    else { Log-Output "[WARN] TCG Specification Profile Alignment : Motherboard formatting defaults out of spec." 'DarkYellow' }
+    if ($TcgData.Ebbr -eq $true) { Log-Output "[PASS] TCG Specification Profile" 'Green' }
+    else { Log-Output "[INFO] TCG Specification Profile" 'DarkYellow' }
 
-    if ($TcgData.KernelDebug -eq $true) { Log-Output "[PASS] OS Production Baseline Mode : Non-debug production kernel confirmed." 'Green' }
-    elseif ($TcgData.KernelDebug -eq $false) { Log-Output "[WARN] OS Production Baseline Mode : Test-signing or Active Kernel Debugging detected!" 'DarkYellow' }
+    if ($TcgData.KernelDebug -eq $true) { Log-Output "[PASS] OS Production Baseline Mode" 'Green' }
+    elseif ($TcgData.KernelDebug -eq $false) { Log-Output "[INFO] OS Production Baseline Mode" 'DarkYellow' }
 
-    if ($TcgData.Bitlocker -eq $true) { Log-Output "[PASS] BitLocker Native Storage Policy Handshake : Active pre-boot validation logged." 'Green' }
-    if ($TcgData.Pcr7Ready -eq $true) { Log-Output "[PASS] Cloud Device Attestation Readiness : Perfect PCR 7 bound signature design matrix." 'Green' }
-    else { Log-Output "[WARN] Cloud Device Attestation Readiness : Incompatible register signature design matrix." 'DarkYellow' }
-#>
+    if ($TcgData.Bitlocker -eq $true) { Log-Output "[PASS] BitLocker Native Storage Policy Handshake" 'Green' }
+    if ($TcgData.Pcr7Ready -eq $true) { Log-Output "[PASS] Cloud Device Attestation Readiness" 'Green' }
+    else { Log-Output "[INFO] Cloud Device Attestation Readiness" 'DarkYellow' }
+
 	Log-Output ""
 }
 
