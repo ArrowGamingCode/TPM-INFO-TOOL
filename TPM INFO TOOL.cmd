@@ -1,11 +1,13 @@
-# Name: TPM INFO TOOL
-# Updates: Check https://github.com/ArrowGamingCode/TPM-INFO-TOOL for updates.
-# Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
-# Use official tools and troubleshooting first!
-# License: GNU General Public License version 3
-
 <# : chooser
 @echo off
+
+:: # Name: TPM INFO TOOL
+:: # Updates: Check https://github.com/ArrowGamingCode/TPM-INFO-TOOL for updates.
+:: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
+:: # Use official tools and troubleshooting first!
+:: # License: GNU General Public License version 3
+set "TPM_TOOL_VERSION=1.0.2"
+
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
@@ -56,6 +58,7 @@ $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
 $global:TotalSteps   = 44
+$ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
 # FUNCTIONS
@@ -1056,7 +1059,7 @@ function Show-UIOutput ($Data) {
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
 
-    Log-Output "TPM INFO TOOL - 1.0.2  - PowerShell: $($Data.PowerShellVer)"
+    Log-Output "TPM INFO TOOL - $ScriptVersion - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild)) - Supported: $($Data.OSSupported)"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
