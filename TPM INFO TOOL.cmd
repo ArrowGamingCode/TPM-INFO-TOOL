@@ -876,6 +876,26 @@ function Show-PCR_Message() {
     }
 }
 
+function Get-Win10SupportStatus {
+    $OS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
+
+    if ($OS -match "Windows 10") {
+        if ($OS -match "LTSC" -or $OS -match "LTSB") {
+            return "True"
+        }
+        return "True (ESU)"
+    }
+    elseif ($OS -match "Windows 11") {
+        return "True"
+    }
+    else {
+        return "False"
+    }
+}
+
+# Run it
+Get-Win10SupportStatus
+
 function Show-TcgAttestationAudit ($TcgData) {
     Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
 
@@ -1028,7 +1048,7 @@ function Show-UIOutput ($Data) {
 
     Log-Output "TPM INFO TOOL - 1.0.2  - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
-    Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild))"
+    Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild)) - Supported: $($Data.OSSupported)"
     Log-Output "CPU:          $($Data.CpuInfo.Name)"
 	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
     Log-Output "Motherboard:  $($Data.Mobo)"
@@ -1260,6 +1280,7 @@ function Invoke-MainExecution {
 		CurrentOS             = $(Step-Progress; (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
 		PowerShellVer		  = $(Step-Progress; Get-PowerShellVersion)
 		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
+		OSSupported           = $(Step-Progress; Get-Win10SupportStatus)
     }
 
     Show-UIOutput -Data $systemData
