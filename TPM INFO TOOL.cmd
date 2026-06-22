@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 44
+$global:TotalSteps   = 45
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -245,6 +245,22 @@ function Get-MicrosoftCaStatus {
         return [PSCustomObject]@{
             Uefi2023Text = "Unreadable / Secure Boot Off"
             Passed       = $false
+        }
+    }
+}
+
+function Get-DoesThirdPartySecurityExist {
+    try {
+        # Query SecurityCenter2, drop Defender, and check if any objects remain
+        $hasThirdParty = (Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName "AntivirusProduct" -ErrorAction SilentlyContinue |
+            Where-Object { $_.displayName -notmatch 'Defender' }).Count -gt 0
+
+        return [PSCustomObject]@{
+            Passed = $hasThirdParty
+        }
+    } catch {
+        return [PSCustomObject]@{
+            Passed = $false
         }
     }
 }
@@ -1169,7 +1185,8 @@ function Show-UIOutput ($Data) {
     if ($Data.XboxRandgrid.RegKeyExists) {
         Log-Output 'RESULT: Xbox randgrid' 'Green'
     }
-
+	
+	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed)"
     Log-Output "Battery:      $($Data.BatteryInfo.Text)"
     Log-Output "Partition:    $($Data.PartitionStyle)"
 	Log-Output "Activision Key: $($Data.ActivisionKey)"
@@ -1322,6 +1339,7 @@ function Invoke-MainExecution {
 		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
 		OSSupported           = $(Step-Progress; Get-Win10SupportStatus)
 		PcModel               = $(Step-Progress; Get-PcModel)
+		doesThirdPartySecurityExist = $(Step-Progress; Get-DoesThirdPartySecurityExist)
     }
 
     Show-UIOutput -Data $systemData
