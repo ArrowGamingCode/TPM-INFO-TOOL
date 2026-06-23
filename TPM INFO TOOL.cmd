@@ -251,12 +251,13 @@ function Get-MicrosoftCaStatus {
 
 function Get-DoesThirdPartySecurityExist {
     try {
-        # Query SecurityCenter2, drop Defender, and check if any objects remain
-        $hasThirdParty = (Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName "AntivirusProduct" -ErrorAction SilentlyContinue |
-            Where-Object { $_.displayName -notmatch 'Defender' }).Count -gt 0
+        $avProducts = @(
+            Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName "AntivirusProduct" -ErrorAction SilentlyContinue |
+                Where-Object { $_.displayName -notmatch 'Defender' }
+        )
 
         return [PSCustomObject]@{
-            Passed = $hasThirdParty
+            Passed = $avProducts.Count -gt 0
         }
     } catch {
         return [PSCustomObject]@{
