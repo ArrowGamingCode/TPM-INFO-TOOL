@@ -1091,12 +1091,10 @@ function Test-SecurityCompliance {
             if ($type -match "EV_EFI_VARIABLE_DRIVER_CONFIG" -or $type -match "80000001") {
                 $hasPcr7Variables = $true
                 if ($data -match "SecureBoot") {
-					if ($data -match "SecureBoot") {
-						if ($data -match "Hex:\s*00") {
-							$check_secureBootState = "?"
-						} else {
-							$check_secureBootState = "Pass"
-						}
+					if ($data -match "Hex:\s*00") {
+						$check_secureBootState = "?"
+					} else {
+						$check_secureBootState = "Pass"
 					}
                 }
                 if ($data -match "PK")  { $check_pkKeyPresent  = $true }
@@ -1138,14 +1136,14 @@ function Show-TcgAttestationAudit ($TcgData) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT (EXPERIMENTAL) ---" 'Cyan'
 	Show-PCR_Message
 
-	if ($Data.MeasuredBootCompliance) {
-		Log-Output "SecureBoot State: $($Data.MeasuredBootCompliance.SecureBootState)"
-		Log-Output "Platform Key:       $($Data.MeasuredBootCompliance.PkKeyPresent)"
-		Log-Output "Key Exchange Keys: $($Data.MeasuredBootCompliance.KekKeyPresent)"
-		Log-Output "DB Signature database:   $($Data.MeasuredBootCompliance.DbKeyPresent)"
-		Log-Output "DBX Revocation list:    $($Data.MeasuredBootCompliance.DbxKeyPresent)"
-		Log-Output "No Kernel Debugging:        $($Data.MeasuredBootCompliance.KernelDebug)"
-		Log-Output "PCR7 Log Binding Valid:  $($Data.MeasuredBootCompliance.Pcr7Attestation)"
+	if ($TcgData) {
+		Log-Output "SecureBoot State: $($TcgData.SecureBootState)"
+		Log-Output "Platform Key:       $($TcgData.PkKeyPresent)"
+		Log-Output "Key Exchange Keys: $($TcgData.KekKeyPresent)"
+		Log-Output "DB Signature database:   $($TcgData.DbKeyPresent)"
+		Log-Output "DBX Revocation list:    $($TcgData.DbxKeyPresent)"
+		Log-Output "No Kernel Debugging:        $($TcgData.KernelDebug)"
+		Log-Output "PCR7 Log Binding Valid:  $($TcgData.Pcr7Attestation)"
 	}
 	write-host ""
 }
@@ -1256,7 +1254,7 @@ function Show-UIOutput ($Data) {
     }
 
 	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
-#(unsure if all system work with this	-and $Data.LocalAttest
+							#(unsure if all system work with this -and $Data.LocalAttest
 
     Clear-Host
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
@@ -1393,7 +1391,7 @@ function Show-UIOutput ($Data) {
     $global:ClipboardBuffer += $certOut
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
-	Log-Output $data.parsedTpmToolType
+	Log-Output $Data.parsedTpmToolType
 	$exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
 			   'Lockout Counter', 'Max Auth Fail', 'Lockout Interval', 'Lockout Recovery'
     foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
@@ -1403,8 +1401,8 @@ function Show-UIOutput ($Data) {
     }
 	Log-Output ""
 
-	#Print-PCRTable($data.parsedTpmToolType)
-	Show-TcgAttestationAudit -TcgData $Data.TcgAudit
+	#Print-PCRTable
+	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
 
     Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
 
