@@ -1174,8 +1174,12 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
-    if ($Data.TpmInfo.AmdFixRequired) {
-        Log-Output "-> Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
+	if ($Data.TpmInfo.AmdFixRequired) {
+        if ($Data.BitLocker -and $Data.BitLocker.Passed -eq $false) {
+            Log-Output "-> Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
+        } else {
+            Log-Output "-> Your current AMD TPM firmware version requires an update, but you have bitlocker." 'Yellow'
+        }
         $hasIssues = $true
     }
 
