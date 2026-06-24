@@ -71,12 +71,25 @@ function Step-Progress {
 }
 
 function Get-CpuCompliance {
-    $cpu = Get-CimInstance -ClassName Win32_Processor
-    $isPassed = if ($cpu.Name -match 'Ryzen \d+ [12]\d{3}') { $false } else { $true }
+    try {
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop
+        $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
+        $isPassed = $true
 
-    return [PSCustomObject]@{
-        Name   = $cpu.Name
-        Passed = $isPassed
+        if ($cpuName -match 'AMD Ryzen' -and $cpuName -match '\b([12]\d{3})[A-Z]*\b') {
+            $isPassed = $false
+        }
+
+        return [PSCustomObject]@{
+            Name   = $cpu.Name
+            Passed = $isPassed
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Name   = "Unknown"
+            Passed = $false
+        }
     }
 }
 
