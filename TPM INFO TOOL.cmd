@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.2"
+set "TPM_TOOL_VERSION=1.0.3"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -810,81 +810,21 @@ function Get-PcModel {
     }
 }
 
-function Get-TcgAttestationAudit {
-    $rawLogs = $null
-
-	if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
-        $measuredBootPath = "$env:SystemRoot\Logs\MeasuredBoot"
-
-        if (Test-Path $measuredBootPath) {
-            $latestLog = Get-ChildItem -Path $measuredBootPath -Filter "*.log" |
-                         Sort-Object LastWriteTime -Descending |
-                         Select-Object -First 1
-
-            if ($latestLog) {
-                $rawLogs = tpmtool parsetcglogs -path $latestLog.FullName -validate -ErrorAction Stop
-            }
-        }
-    }else{
-		$rawLogs = tpmtool parsetcglogs -validate
-	}
-
-    if ($rawLogs) {
-        $fullLogText = if ($rawLogs -is [array]) { $rawLogs -join "`n" } else { $rawLogs }
-
-        $check_secureBootState = if ($fullLogText -match 'SecureBoot.*0x1' -or $fullLogText -match '00\s+74\s+00\s+01') { $true } elseif ($fullLogText -match 'SecureBoot.*0x0' -or $fullLogText -match '00\s+74\s+00\s+00') { $false } else { "Unknown" }
-        $check_pkKeyPresent    = $fullLogText -match 'P\s*K\s*.*?'
-        $check_kekKeyPresent   = $fullLogText -match 'K\s*E\s*K\s*.*?'
-        $check_dbKeyPresent    = $fullLogText -match 'd\s*b\s*.*?'
-        $check_dbxKeyPresent   = $fullLogText -match 'd\s*b\s*x\s*'
-        $check_ebbrProfile     = $fullLogText -match 'Spec ID Event03' -or $fullLogText -match '53\s+70\s+65\s+63\s+20\s+49\s+44'
-        $check_kernelDebug     = if ($fullLogText -match 'KernelDebug.*0x1' -or $fullLogText -match 'TestSigning.*0x1') { $false } elseif ($fullLogText -match 'KernelDebug.*0x0' -and $fullLogText -match 'TestSigning.*0x0') { $true } else { "Unknown" }
-        $check_bitlockerPolicy = $fullLogText -match 'BitLocker' -or $fullLogText -match 'B\s*i\s*t\s*L\s*o\s*c\s*k\s*e\s*r'
-        $check_pcr7Attestation = $fullLogText -match 'PCR7' -or ($check_secureBootState -eq $true -and $check_pkKeyPresent -eq $true)
-        $pcrFailures           = @()
-    } else {
-        $check_secureBootState = "unreadable"
-        $check_pkKeyPresent    = $false
-        $check_kekKeyPresent   = $false
-        $check_dbKeyPresent    = $false
-        $check_dbxKeyPresent   = $false
-        $check_ebbrProfile     = $false
-        $check_kernelDebug     = "unreadable"
-        $check_bitlockerPolicy = $false
-        $check_pcr7Attestation = $false
-        $pcrFailures           = @("unreadable")
-    }
-
-    return [PSCustomObject]@{
-        PcrFailures = $pcrFailures
-        SbState     = $check_secureBootState
-        PkPresent   = $check_pkKeyPresent
-        KekPresent  = $check_kekKeyPresent
-        DbPresent   = $check_dbKeyPresent
-        DbxPresent  = $check_dbxKeyPresent
-        Ebbr        = $check_ebbrProfile
-        KernelDebug = $check_kernelDebug
-        Bitlocker   = $check_bitlockerPolicy
-        Pcr7Ready   = $check_pcr7Attestation
-        LogStatus   = $isFallback
-    }
-}
-
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
 
 function Show-PlatformStatus {
     if ($global:platforms.SteamFound) {
-        Log-Output "RESULT: Steam Call of Duty Found"
+        Log-Output "RESULT: Steam CoD Found"
     } else {
-        Log-Output "RESULT: Steam Call of Duty Not Detected"
+        Log-Output "RESULT: Steam CoD Not Detected"
     }
 
     if ($global:platforms.BnetFound) {
-        Log-Output "RESULT: Battle.net Call of Duty Found"
+        Log-Output "RESULT: Battle.net CoD Found"
     } else {
-        Log-Output "RESULT: Battle.net Call of Duty Not Detected"
+        Log-Output "RESULT: Battle.net CoD Not Detected"
     }
 }
 
@@ -956,41 +896,258 @@ function Get-Win10SupportStatus {
     }
 }
 
-function Show-TcgAttestationAudit ($TcgData) {
-    Log-Output "`n--- TCG LOG ATTESTATION AUDIT ---" 'Cyan'
 
+
+
+
+
+
+
+
+function Invoke-TpmLogParser {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $false)]
+        [string]$OutputFolder = "$env:TEMP\TPM_Gathered_Logs"
+    )
+    if (-not (Test-Path $OutputFolder)) {
+        New-Item -ItemType Directory -Path $OutputFolder | Out-Null
+    }
+
+    & tpmtool.exe gatherlogs $OutputFolder | Out-Null
+    $targetLog = Join-Path $OutputFolder "SRTMBoot.dat"
+
+    if (-not (Test-Path $targetLog)) {
+        return $null
+    }
+    $binaryData = [System.IO.File]::ReadAllBytes($targetLog)
+    return Decode-TcgBinaryLog -BinaryLog $binaryData
+}
+
+function Decode-TcgBinaryLog {
+    [CmdletBinding()]
+    param ([Parameter(Mandatory = $true)][byte[]]$BinaryLog)
+
+    $offset = 0
+    $eventIndex = 0
+    $results = New-Object System.Collections.Generic.List[PSCustomObject]
+    if ($BinaryLog.Length -lt 32) { return $null }
+
+    $pcrIndex = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+    $eventTypeVal = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+    $eventTypeName = Get-EventTypeName -Id $eventTypeVal
+    $digestBytes = Read-Bytes -Offset ([ref]$offset) -Buffer $BinaryLog -Count 20
+    $eventSize = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+    $eventDataBytes = Read-Bytes -Offset ([ref]$offset) -Buffer $BinaryLog -Count $eventSize
+    $headerText = [System.Text.Encoding]::ASCII.GetString($eventDataBytes) -replace '[^\x20-\x7E]', ''
+
+    $results.Add([PSCustomObject]@{
+        Index     = $eventIndex++
+        PCRIndex  = $pcrIndex
+        EventType = $eventTypeName
+        Digests   = "Header Spec Event"
+        EventSize = $eventSize
+        EventData = $headerText.Trim()
+    })
+
+    while ($offset -lt $BinaryLog.Length) {
+        if (($BinaryLog.Length - $offset) -lt 12) { break }
+        $paddingCheck = $true
+        for ($j = 0; $j -lt 12; $j++) {
+            if ($BinaryLog[$offset + $j] -ne 0) { $paddingCheck = $false; break }
+        }
+        if ($paddingCheck) { break }
+
+        $pcrIndex = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+        $eventTypeVal = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+        $digestCount = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+        $eventTypeName = Get-EventTypeName -Id $eventTypeVal
+        $digests = @()
+        $alignmentFailed = $false
+
+        for ($i = 0; $i -lt $digestCount; $i++) {
+            if (($BinaryLog.Length - $offset) -lt 2) { $alignmentFailed = $true; break }
+            $algId = Get-UInt16 -Offset ([ref]$offset) -Buffer $BinaryLog
+            $algInfo = Get-AlgInfo -Id $algId
+            if ($null -ne $algInfo) {
+                $hashSize = $algInfo.Size
+                $algName  = $algInfo.Name
+                if (($BinaryLog.Length - $offset) -lt $hashSize) { $alignmentFailed = $true; break }
+                $hashBytes = Read-Bytes -Offset ([ref]$offset) -Buffer $BinaryLog -Count $hashSize
+                $hashHex = [BitConverter]::ToString($hashBytes).Replace('-', '')
+                $digests += "$algName`:$hashHex"
+            } else {
+                $alignmentFailed = $true; break
+            }
+        }
+
+        if ($alignmentFailed -or (($BinaryLog.Length - $offset) -lt 4)) { break }
+        $eventSize = Get-UInt32 -Offset ([ref]$offset) -Buffer $BinaryLog
+        if (($BinaryLog.Length - $offset) -lt $eventSize) { break }
+        $eventDataBytes = Read-Bytes -Offset ([ref]$offset) -Buffer $BinaryLog -Count $eventSize
+
+        $printableText = [System.Text.Encoding]::UTF8.GetString($eventDataBytes) -replace '[^\x20-\x7E\s]', ''
+        if ($printableText.Trim().Length -lt 2 -and $eventSize -gt 0) {
+            $printableText = "Hex: " + [BitConverter]::ToString($eventDataBytes).Replace('-', '')
+        }
+
+        $results.Add([PSCustomObject]@{
+            Index     = $eventIndex++
+            PCRIndex  = $pcrIndex
+            EventType = $eventTypeName
+            Digests   = ($digests -join " | ")
+            EventSize = $eventSize
+            EventData = $printableText.Trim()
+        })
+    }
+    return $results
+}
+
+function Read-Bytes {
+    param ([ref]$Offset, [byte[]]$Buffer, [int]$Count)
+    $result = New-Object byte[] $Count
+    [Buffer]::BlockCopy($Buffer, $Offset.Value, $result, 0, $Count)
+    $Offset.Value += $Count
+    return $result
+}
+
+function Get-UInt32 {
+    param ([ref]$Offset, [byte[]]$Buffer)
+    return [BitConverter]::ToUInt32((Read-Bytes -Offset $Offset -Buffer $Buffer -Count 4), 0)
+}
+
+function Get-UInt16 {
+    param ([ref]$Offset, [byte[]]$Buffer)
+    return [BitConverter]::ToUInt16((Read-Bytes -Offset $Offset -Buffer $Buffer -Count 2), 0)
+}
+
+function Get-AlgInfo {
+    param ([uint16]$Id)
+    switch ($Id) {
+        0x0004 { return @{ Name = "SHA1"; Size = 20 } }
+        0x000B { return @{ Name = "SHA256"; Size = 32 } }
+        0x000C { return @{ Name = "SHA384"; Size = 48 } }
+        0x000D { return @{ Name = "SHA512"; Size = 64 } }
+        0x0012 { return @{ Name = "SM3_256"; Size = 32 } }
+        default { return $null }
+    }
+}
+
+function Get-EventTypeName {
+    param ([uint32]$Id)
+    switch ($Id) {
+        0x00000000 { return "EV_PREBOOT_CERT" }
+        0x00000001 { return "EV_POST_CODE" }
+        0x00000002 { return "EV_UNUSED" }
+        0x00000003 { return "EV_NO_ACTION" }
+        0x00000004 { return "EV_SEPARATOR" }
+        0x00000005 { return "EV_ACTION" }
+        0x00000006 { return "EV_EVENT_TAG" }
+        0x00000007 { return "EV_S_CRTM_CONTENTS" }
+        0x00000008 { return "EV_S_CRTM_VERSION" }
+        0x00000009 { return "EV_CPU_MICROCODE" }
+        0x0000000A { return "EV_PLATFORM_CONFIG_FLAGS" }
+        0x0000000B { return "EV_TABLE_OF_DEVICES" }
+        0x0000000C { return "EV_COMPACT_HASH" }
+        0x0000000D { return "EV_IPL" }
+        0x0000000E { return "EV_IPL_PARTITION_DATA" }
+        0x0000000F { return "EV_NONHOST_CODE" }
+        0x00000010 { return "EV_NONHOST_CONFIG" }
+        0x00000011 { return "EV_NONHOST_INFO" }
+        0x80000001 { return "EV_EFI_VARIABLE_DRIVER_CONFIG" }
+        0x80000002 { return "EV_EFI_VARIABLE_BOOT" }
+        0x80000003 { return "EV_EFI_BOOT_SERVICES_APPLICATION" }
+        0x80000004 { return "EV_EFI_BOOT_SERVICES_DRIVER" }
+        0x80000005 { return "EV_EFI_RUNTIME_SERVICES_DRIVER" }
+        0x80000006 { return "EV_EFI_GPT_DATA" }
+        0x80000007 { return "EV_EFI_ACTION" }
+        0x80000008 { return "EV_EFI_PLATFORM_FIRMWARE_BLOB" }
+        0x80000009 { return "EV_EFI_HANDOFF_TABLES" }
+        0x8000000A { return "EV_EFI_VARIABLE_AUTHORITY" }
+        default    { return "Unknown (0x" + $Id.ToString("X8") + ")" }
+    }
+}
+
+function Test-SecurityCompliance {
+    param ($DecodedLog)
+    if (-not $DecodedLog) { return $null }
+
+    $check_secureBootState  = "Unknown"
+    $check_pkKeyPresent     = $false
+    $check_kekKeyPresent    = $false
+    $check_dbKeyPresent     = $false
+    $check_dbxKeyPresent    = $false
+    $check_kernelDebug      = "Unknown"
+    $check_bitlockerPolicy  = $false
+    $check_pcr7Attestation  = $false
+    $hasPcr7Variables       = $false
+    $hasPcr7Authority       = $false
+
+    foreach ($event in $DecodedLog) {
+        $data = $event.EventData
+        $type = $event.EventType
+
+        if ($event.PCRIndex -eq 7) {
+            if ($type -match "EV_EFI_VARIABLE_DRIVER_CONFIG" -or $type -match "80000001") {
+                $hasPcr7Variables = $true
+                if ($data -match "SecureBoot") {
+					if ($data -match "SecureBoot") {
+						if ($data -match "Hex:\s*00") {
+							$check_secureBootState = "?"
+						} else {
+							$check_secureBootState = "Pass"
+						}
+					}
+                }
+                if ($data -match "PK")  { $check_pkKeyPresent  = $true }
+                if ($data -match "KEK") { $check_kekKeyPresent = $true }
+                if ($data -match "db")  { $check_dbKeyPresent  = $true }
+                if ($data -match "dbx") { $check_dbxKeyPresent = $true }
+            }
+            if ($type -match "EV_EFI_VARIABLE_AUTHORITY" -or $type -match "8000000A") {
+                $hasPcr7Authority = $true
+            }
+        }
+        if ($event.PCRIndex -eq 13 -and $data -match "bootmgfw.efi") {
+            if ($data -match "debug=true" -or $data -match "bootdebug=true") { $check_kernelDebug = "Enabled (Insecure)" }
+            else { $check_kernelDebug = "Pass" }
+        }
+        if ($event.PCRIndex -eq 13 -and ($data -match "VbsSiPolicy.p7b" -or $data -match "siPolicy")) {
+            $check_bitlockerPolicy = $true
+        }
+    }
+
+    if ($hasPcr7Variables -and $check_pkKeyPresent -and $check_dbKeyPresent) {
+        $check_pcr7Attestation = $true
+    }
+
+    Write-Host "`n=== TPM MEASURED BOOT SECURITY COMPLIANCE REPORT ===" -ForegroundColor Cyan
+    return [PSCustomObject]@{
+        SecureBootState = $check_secureBootState
+        PkKeyPresent    = if ($check_pkKeyPresent) { "Pass" } else { "?" }
+        KekKeyPresent   = if ($check_kekKeyPresent) { "Pass" } else { "?" }
+        DbKeyPresent    = if ($check_dbKeyPresent) { "Pass" } else { "?" }
+        DbxKeyPresent   = if ($check_dbxKeyPresent) { "Pass" } else { "?" }
+        KernelDebug     = $check_kernelDebug
+        Pcr7Attestation = if ($check_pcr7Attestation) { "Pass" } else { "?" }
+    }
+}
+
+
+function Show-TcgAttestationAudit ($TcgData) {
+    Log-Output "--- MEASURED BOOT BINARY AUDIT (EXPERIMENTAL) ---" 'Cyan'
 	Show-PCR_Message
 
-	return
-	#Below code still in dev
-
-    if ($TcgData.SbState -eq $true) {
-        Log-Output "[PASS] Secure Boot state (0x01)" 'Green'
-    } elseif ($TcgData.SbState -eq $false) {
-        Log-Output "[INFO] Secure Boot state (0x00)" 'DarkYellow'
-    }
-
-    @(@('Platform Key', $TcgData.PkPresent, ''),
-      @('Key Exchange Key DB', $TcgData.KekPresent, ''),
-      @('Signature DB', $TcgData.DbPresent, ''),
-      @('Revocation Tree', $TcgData.DbxPresent, '')) |
-    ForEach-Object {
-        if ($_[1] -eq $true) { Log-Output "[PASS] $_" 'Green' }
-        else { Log-Output "[INFO] $_[0] : " 'DarkYellow';
-        Log-Output "       Detail: $_[2]" 'DarkRed' }
-    }
-
-    if ($TcgData.Ebbr -eq $true) { Log-Output "[PASS] TCG Specification Profile" 'Green' }
-    else { Log-Output "[INFO] TCG Specification Profile" 'DarkYellow' }
-
-    if ($TcgData.KernelDebug -eq $true) { Log-Output "[PASS] OS Production Baseline Mode" 'Green' }
-    elseif ($TcgData.KernelDebug -eq $false) { Log-Output "[INFO] OS Production Baseline Mode" 'DarkYellow' }
-
-    if ($TcgData.Bitlocker -eq $true) { Log-Output "[PASS] BitLocker Native Storage Policy Handshake" 'Green' }
-    if ($TcgData.Pcr7Ready -eq $true) { Log-Output "[PASS] Cloud Device Attestation Readiness" 'Green' }
-    else { Log-Output "[INFO] Cloud Device Attestation Readiness" 'DarkYellow' }
-
-	Log-Output ""
+	if ($Data.MeasuredBootCompliance) {
+		Log-Output "SecureBoot State: $($Data.MeasuredBootCompliance.SecureBootState)"
+		Log-Output "Platform Key:       $($Data.MeasuredBootCompliance.PkKeyPresent)"
+		Log-Output "Key Exchange Keys: $($Data.MeasuredBootCompliance.KekKeyPresent)"
+		Log-Output "DB Signature database:   $($Data.MeasuredBootCompliance.DbKeyPresent)"
+		Log-Output "DBX Revocation list:    $($Data.MeasuredBootCompliance.DbxKeyPresent)"
+		Log-Output "No Kernel Debugging:        $($Data.MeasuredBootCompliance.KernelDebug)"
+		Log-Output "PCR7 Log Binding Valid:  $($Data.MeasuredBootCompliance.Pcr7Attestation)"
+	}
+	write-host ""
 }
 
 # =========================================================================
@@ -1334,7 +1491,7 @@ function Invoke-MainExecution {
 		LocalAttest           = $(Step-Progress; Get-LocalAttestationStatus)
 		parsedTpmToolType     = $(Step-Progress; $parsedTpmToolTypeObject)
 		IntelBiosInfo         = $(Step-Progress; Get-IntelBiosCompliance)
-		TcgAudit              = $(Step-Progress; Get-TcgAttestationAudit)
+		MeasuredBootCompliance = $(Step-Progress; Test-SecurityCompliance -DecodedLog (Invoke-TpmLogParser))
 		CurrentOS             = $(Step-Progress; (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
 		PowerShellVer		  = $(Step-Progress; Get-PowerShellVersion)
 		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
