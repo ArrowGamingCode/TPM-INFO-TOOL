@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 47
+$global:TotalSteps   = 48
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -440,40 +440,78 @@ function Get-XboxRandgridInfo {
 function Get-PlatformInstallStatus {
     $steamInstalled = $false
     $steamPath = ""
+
     $steamReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam" -Name "InstallPath" -ErrorAction SilentlyContinue
 
     if ($steamReg) {
-        $steamPath = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty HQ"
-        if (-not (Test-Path $steamPath)) {
-              $steamPath = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty"
+        $primaryHQ = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty HQ"
+        $primaryLegacy = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty"
+
+        if (Test-Path (Join-Path $primaryHQ "bootstrapper.exe")) {
+            $steamPath = $primaryHQ
+            $steamInstalled = $true
+        } elseif (Test-Path (Join-Path $primaryLegacy "bootstrapper.exe")) {
+            $steamPath = $primaryLegacy
+            $steamInstalled = $true
         }
-        if (Test-Path $steamPath) { $steamInstalled = $true }
     }
 
     if (-not $steamInstalled) {
         $drives = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
         foreach ($d in $drives) {
-            $testPath = "$($d.DeviceID)\SteamLibrary\steamapps\common\Call of Duty HQ"
-            $testPath2 = "$($d.DeviceID)\SteamLibrary\steamapps\common\Call of Duty"
-            if (Test-Path $testPath) {
+            $testPath = Join-Path $d.DeviceID "SteamLibrary\steamapps\common\Call of Duty HQ"
+            if (Test-Path (Join-Path $testPath "bootstrapper.exe")) {
                 $steamPath = $testPath
                 $steamInstalled = $true
                 break
             }
-            if (Test-Path $testPath2) {
-                $steamPath = $testPath2
-                $steamInstalled = $true
-                break
+        }
+
+        if (-not $steamInstalled) {
+            foreach ($d in $drives) {
+                $testPath2 = Join-Path $d.DeviceID "SteamLibrary\steamapps\common\Call of Duty"
+                if (Test-Path (Join-Path $testPath2 "bootstrapper.exe")) {
+                    $steamPath = $testPath2
+                    $steamInstalled = $true
+                    break
+                }
             }
         }
     }
 
     $bnetInstalled = $false
     $bnetPath = ""
-    $bnetReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Call of Duty" -Name "InstallLocation" -ErrorAction SilentlyContinue
-    if ($bnetReg -and (Test-Path $bnetReg.InstallLocation)) {
-        $bnetPath = $bnetReg.InstallLocation
-        $bnetInstalled = $true
+
+    $bnetRegPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Call of Duty",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Call of Duty"
+    )
+
+    foreach ($path in $bnetRegPaths) {
+        if (Test-Path $path) {
+            $bnetReg = Get-ItemProperty -Path $path -Name "InstallLocation" -ErrorAction SilentlyContinue
+            if ($bnetReg -and (Test-Path $bnetReg.InstallLocation)) {
+                $bnetPath = $bnetReg.InstallLocation
+                $bnetInstalled = $true
+                break
+            }
+        }
+    }
+
+    if (-not $bnetInstalled) {
+        $defaultBnetPaths = @(
+            "${env:ProgramFiles}\Call of Duty HQ",
+            "${env:ProgramFiles}\Call of Duty",
+            "${env:ProgramFiles(x86)}\Call of Duty HQ",
+            "${env:ProgramFiles(x86)}\Call of Duty"
+        )
+        foreach ($path in $defaultBnetPaths) {
+            if (Test-Path (Join-Path $path "bootstrapper.exe")) {
+                $bnetPath = $path
+                $bnetInstalled = $true
+                break
+            }
+        }
     }
 
     return [PSCustomObject]@{
@@ -1153,7 +1191,6 @@ function Test-SecurityCompliance {
         $check_pcr7Attestation = $true
     }
 
-    Write-Host "`n=== TPM MEASURED BOOT SECURITY COMPLIANCE REPORT ===" -ForegroundColor Cyan
     return [PSCustomObject]@{
         SecureBootState = $check_secureBootState
         PkKeyPresent    = if ($check_pkKeyPresent) { "Pass" } else { "?" }
@@ -1246,6 +1283,69 @@ function Get-CallOfDutyLogStatus {
             Content     = @()
         }
     }
+}
+
+function Get-CallOfDutyBootstrapperStatus {
+    $GamePaths = @()
+
+    if ($global:platforms.BnetFound -and $global:platforms.BnetPath) {
+        $GamePaths += [PSCustomObject]@{ Platform = "Battle.net"; Path = $global:platforms.BnetPath }
+    }
+
+    if ($global:platforms.SteamFound -and $global:platforms.SteamPath) {
+        $GamePaths += [PSCustomObject]@{ Platform = "Steam"; Path = $global:platforms.SteamPath }
+    }
+
+    if ($GamePaths.Count -eq 0) {
+        return [PSCustomObject]@{
+            Platform    = "None"
+            Found       = $false
+            Passed      = $false
+            BottomLines = @("Game directory not detected or missing for any platform")
+        }
+    }
+
+    $Results = foreach ($Target in $GamePaths) {
+        $Path = $Target.Path
+        $Platform = $Target.Platform
+
+        if (-not (Test-Path $Path)) {
+            [PSCustomObject]@{
+                Platform    = $Platform
+                Found       = $false
+                Passed      = $false
+                BottomLines = @("Game directory path configured but does not exist on disk")
+            }
+            continue
+        }
+
+        $LogPath = Join-Path $Path "bootstrapper.log"
+
+        if (Test-Path $LogPath) {
+            $LastLine = Get-Content $LogPath -Tail 1 -ErrorAction SilentlyContinue
+
+            $Passed = $false
+            if ($LastLine -and $LastLine -match "Success") {
+                $Passed = $true
+            }
+
+            [PSCustomObject]@{
+                Platform    = $Platform
+                Found       = $true
+                Passed      = $Passed
+                BottomLines = if ($LastLine) { @($LastLine) } else { @("Log file is empty") }
+            }
+        } else {
+            [PSCustomObject]@{
+                Platform    = $Platform
+                Found       = $false
+                Passed      = $false
+                BottomLines = @("bootstrapper.log not found")
+            }
+        }
+    }
+
+    return $Results
 }
 
 # =========================================================================
@@ -1344,6 +1444,7 @@ function PrintLargeOverallResult ($result) {
 
 function Show-UIOutput ($Data) {
 	Step-Progress
+	Write-Host "Testing Certreq.." -ForegroundColor White
     if ($TestFile -and (Test-Path $TestFile)) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
@@ -1517,11 +1618,10 @@ function Show-UIOutput ($Data) {
 	Log-Output "`n--- LOGS ---" 'Cyan'
     if ($Data.CodBrokerLog.Exists) {
         if ($Data.CodBrokerLog.Passed) {
-            Log-Output "RESULT: broker_service.log is 0 bytes (Pass)" 'Green'
+            Log-Output "PASS: broker_service.log" 'Green'
         } else {
-            Log-Output "RESULT: broker_service.log is $($Data.CodBrokerLog.Size) bytes (Fail)" 'Red'
+            Log-Output "RESULT: broker_service.log" 'White'
             if ($Data.CodBrokerLog.Content.Count -gt 0) {
-                Log-Output "--- Log Content (Up to 3 lines) ---" 'Yellow'
                 foreach ($Line in $Data.CodBrokerLog.Content) {
                     Log-Output "  $Line" 'White'
                 }
@@ -1530,7 +1630,20 @@ function Show-UIOutput ($Data) {
     } else {
         Log-Output "RESULT: broker_service.log not found" 'White'
     }
-		Log-Output ""
+
+	if ($Data.CodBootstrapperStatus.Found) {
+        if ($Data.CodBootstrapperStatus.Passed) {
+            Log-Output "PASS: bootstrapper.log" 'Green'
+        } else {
+            Log-Output "INFO: bootstrapper.log"
+            foreach ($Line in $Data.CodBootstrapperStatus.BottomLines) {
+                Log-Output "  $Line" 'White'
+            }
+        }
+    } else {
+        Log-Output "RESULT: bootstrapper.log tracking skipped ($($Data.CodBootstrapperStatus.BottomLines[0]))" 'White'
+    }
+	Log-Output ""
 
 	#Print-PCRTable
 	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
@@ -1629,6 +1742,7 @@ function Invoke-MainExecution {
 		doesThirdPartySecurityExist = $(Step-Progress; Get-DoesThirdPartySecurityExist)
 		CompatibilityFlags    = $(Step-Progress; Test-CompatibilityFlag)
 		CodBrokerLog          = $(Step-Progress; Get-CallOfDutyLogStatus)
+		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
     }
 
     Show-UIOutput -Data $systemData
