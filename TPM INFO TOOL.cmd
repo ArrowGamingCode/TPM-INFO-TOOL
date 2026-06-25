@@ -804,31 +804,32 @@ function Check-AppUpdateHash {
     if (-not $LocalFilePath) {
         $LocalFilePath = [System.IO.Path]::Combine((Get-Location).Path, "TPM INFO TOOL.cmd")
     }
-    $FileUrl = "https://raw.githubusercontent.com/ArrowGamingCode/TPM-INFO-TOOL/main/TPM%20INFO%20TOOL.cmd"
+
+    if (-not (Test-Path $LocalFilePath)) { return }
+
+    $ApiUrl = "https://api.github.com/repos/ArrowGamingCode/TPM-INFO-TOOL/contents/TPM%20INFO%20TOOL.cmd"
 
     try {
-        if (Test-Path $LocalFilePath) {
-            $FileBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $LocalFilePath))
-            $PrefixBytes = [System.Text.Encoding]::ASCII.GetBytes("blob $($FileBytes.Length)`0")
-            $Sha1 = [System.Security.Cryptography.SHA1]::Create()
-            $CombinedBytes = $PrefixBytes + $FileBytes
-            $LocalGitHash = ([System.BitConverter]::ToString($Sha1.ComputeHash($CombinedBytes))).Replace("-", "").ToLower()
-        } else {
-            return
-        }
+        $FileBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $LocalFilePath))
+        $PrefixBytes = [System.Text.Encoding]::UTF8.GetBytes("blob $($FileBytes.Length)`0")
 
-        $ResponseHeaders = Invoke-WebRequest -Uri $FileUrl -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Headers
+        $Sha1 = [System.Security.Cryptography.SHA1]::Create()
+        $CombinedBytes = $PrefixBytes + $FileBytes
+        $LocalGitHash = ([System.BitConverter]::ToString($Sha1.ComputeHash($CombinedBytes))).Replace("-", "").ToLower()
 
-        if ($ResponseHeaders.ContainsKey('ETag')) {
-            $OnlineGitHash = $ResponseHeaders['ETag'].Replace('W/', '').Replace('"', '').Trim().ToLower()
+        $Headers = @{"User-Agent" = "PowerShell-Update-Checker"}
+        $ApiResponse = Invoke-RestMethod -Uri $ApiUrl -Method Get -TimeoutSec 3 -Headers $Headers -ErrorAction Stop
+
+        if ($ApiResponse -and $ApiResponse.sha) {
+            $OnlineGitHash = $ApiResponse.sha.ToLower()
         } else {
             return
         }
 
         if ($LocalGitHash -ne $OnlineGitHash) {
-			Write-Host "`n`n`n`n`n"
+            Write-Host "`n`n`n`n`n"
             Write-Host "========================= UPDATE AVAILABLE =========================" -ForegroundColor Yellow
-            Write-Host " Please update to latest verion here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor Cyan
+            Write-Host " Please update to latest version here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor Cyan
             Write-Host "====================================================================`n" -ForegroundColor Yellow
         }
     }
