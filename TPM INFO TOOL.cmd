@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 46
+$global:TotalSteps   = 47
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1223,6 +1223,31 @@ function Test-CompatibilityFlag {
     }
 }
 
+function Get-CallOfDutyLogStatus {
+    $LogPath = "C:\ProgramData\Activision\Call of Duty\broker_service.log"
+
+    if (Test-Path $LogPath) {
+        $LogFile = Get-Item $LogPath
+        $SizeInBytes = $LogFile.Length
+
+        $Lines = Get-Content $LogPath -TotalCount 3 -ErrorAction SilentlyContinue
+
+        return [PSCustomObject]@{
+            Exists      = $true
+            Size        = $SizeInBytes
+            Passed      = ($SizeInBytes -eq 0)
+            Content     = $Lines
+        }
+    } else {
+        return [PSCustomObject]@{
+            Exists      = $false
+            Size        = 0
+            Passed      = $false
+            Content     = @()
+        }
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1488,7 +1513,24 @@ function Show-UIOutput ($Data) {
             Log-Output ("{0,-30}: {1}" -f $prop.Name, $prop.Value)
         }
     }
-	Log-Output ""
+
+	Log-Output "`n--- LOGS ---" 'Cyan'
+    if ($Data.CodBrokerLog.Exists) {
+        if ($Data.CodBrokerLog.Passed) {
+            Log-Output "RESULT: broker_service.log is 0 bytes (Pass)" 'Green'
+        } else {
+            Log-Output "RESULT: broker_service.log is $($Data.CodBrokerLog.Size) bytes (Fail)" 'Red'
+            if ($Data.CodBrokerLog.Content.Count -gt 0) {
+                Log-Output "--- Log Content (Up to 3 lines) ---" 'Yellow'
+                foreach ($Line in $Data.CodBrokerLog.Content) {
+                    Log-Output "  $Line" 'White'
+                }
+            }
+        }
+    } else {
+        Log-Output "RESULT: broker_service.log not found" 'White'
+    }
+		Log-Output ""
 
 	#Print-PCRTable
 	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
@@ -1586,6 +1628,7 @@ function Invoke-MainExecution {
 		PcModel               = $(Step-Progress; Get-PcModel)
 		doesThirdPartySecurityExist = $(Step-Progress; Get-DoesThirdPartySecurityExist)
 		CompatibilityFlags    = $(Step-Progress; Test-CompatibilityFlag)
+		CodBrokerLog          = $(Step-Progress; Get-CallOfDutyLogStatus)
     }
 
     Show-UIOutput -Data $systemData
