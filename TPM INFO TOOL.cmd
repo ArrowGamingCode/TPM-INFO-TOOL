@@ -799,6 +799,45 @@ function Get-TpmEndorsementCertStatus {
     }
 }
 
+function Check-AppUpdateHash {
+    $LocalFilePath = $MyInvocation.MyCommand.Path
+    if (-not $LocalFilePath) {
+        $LocalFilePath = [System.IO.Path]::Combine((Get-Location).Path, "TPM INFO TOOL.cmd")
+    }
+    $FileUrl = "https://raw.githubusercontent.com/ArrowGamingCode/TPM-INFO-TOOL/main/TPM%20INFO%20TOOL.cmd"
+
+    try {
+        if (Test-Path $LocalFilePath) {
+            $FileBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $LocalFilePath))
+            $PrefixBytes = [System.Text.Encoding]::ASCII.GetBytes("blob $($FileBytes.Length)`0")
+            $Sha1 = [System.Security.Cryptography.SHA1]::Create()
+            $CombinedBytes = $PrefixBytes + $FileBytes
+            $LocalGitHash = ([System.BitConverter]::ToString($Sha1.ComputeHash($CombinedBytes))).Replace("-", "").ToLower()
+        } else {
+            return
+        }
+
+        $ResponseHeaders = Invoke-WebRequest -Uri $FileUrl -Method Head -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Headers
+
+        if ($ResponseHeaders.ContainsKey('ETag')) {
+            $OnlineGitHash = $ResponseHeaders['ETag'].Replace('W/', '').Replace('"', '').Trim().ToLower()
+        } else {
+            return
+        }
+
+        if ($LocalGitHash -ne $OnlineGitHash) {
+			Write-Host "`n`n`n`n`n"
+            Write-Host "========================= UPDATE AVAILABLE =========================" -ForegroundColor Yellow
+            Write-Host " Please update to latest verion here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor Cyan
+            Write-Host "====================================================================`n" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "[!] Network connection timed out or failed. Running tool offline.`n" -ForegroundColor DarkYellow
+    }
+}
+Check-AppUpdateHash
+
 function Get-PowerShellVersion {
     return $PSVersionTable.PSVersion.ToString()
 }
