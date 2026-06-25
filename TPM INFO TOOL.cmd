@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 45
+$global:TotalSteps   = 46
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1169,6 +1169,47 @@ function Show-TcgAttestationAudit ($TcgData) {
 	write-host ""
 }
 
+function Test-CompatibilityFlag {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string[]]$ExeNames = @("steam.exe", "Battle.net.exe", "cod.exe", "bootstrapper.exe", "CODBrokerInstaller.exe", "CODBrokerService.exe")
+    )
+
+    $regPaths = @(
+        "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers",
+        "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+    )
+
+    $issuesFound = 0
+    $foundEntries = @()
+
+    foreach ($path in $regPaths) {
+        if (Test-Path $path) {
+            $properties = Get-ItemProperty -Path $path
+            foreach ($prop in $properties.PSObject.Properties) {
+                if ($prop.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider')) {
+                    foreach ($exe in $ExeNames) {
+                        if ($prop.Name -like "*$exe") {
+                            $foundEntries += [PSCustomObject]@{
+                                Path  = $prop.Name
+                                Flags = $prop.Value
+                            }
+                            $issuesFound++
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Passed       = ($issuesFound -eq 0)
+        IssuesFound  = $issuesFound
+        FoundEntries = $foundEntries
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1367,6 +1408,16 @@ function Show-UIOutput ($Data) {
         Log-Output 'RESULT: Xbox randgrid' 'Green'
     }
 	
+    if ($Data.CompatibilityFlags.Passed) {
+        Log-Output "[PASS] Compatibility flags are clear." 'Green'
+    } else {
+        Log-Output "[FAIL] Compatibility flags found on target gaming executables!" 'Red'
+        foreach ($entry in $Data.CompatibilityFlags.FoundEntries) {
+            Log-Output "          Found Path: $($entry.Path)" 'DarkYellow'
+            Log-Output "          Applied Flags: $($entry.Flags)" 'DarkRed'
+        }
+    }
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed)"
     Log-Output "Battery:      $($Data.BatteryInfo.Text)"
     Log-Output "Partition:    $($Data.PartitionStyle)"
@@ -1521,6 +1572,7 @@ function Invoke-MainExecution {
 		OSSupported           = $(Step-Progress; Get-Win10SupportStatus)
 		PcModel               = $(Step-Progress; Get-PcModel)
 		doesThirdPartySecurityExist = $(Step-Progress; Get-DoesThirdPartySecurityExist)
+		CompatibilityFlags    = $(Step-Progress; Test-CompatibilityFlag)
     }
 
     Show-UIOutput -Data $systemData
