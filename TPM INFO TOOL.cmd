@@ -269,12 +269,25 @@ function Get-DoesThirdPartySecurityExist {
                 Where-Object { $_.displayName -notmatch 'Defender' }
         )
 
+        $hasThirdParty = $avProducts.Count -gt 0
+        $avName = ""
+
+        if ($hasThirdParty) {
+            $firstName = $avProducts[0].displayName
+
+            if ($firstName -match 'Norton|McAfee') {
+                $avName = $firstName
+            }
+        }
+
         return [PSCustomObject]@{
-            Passed = $avProducts.Count -gt 0
+            Passed = $hasThirdParty
+            Name   = $avName
         }
     } catch {
         return [PSCustomObject]@{
             Passed = $false
+            Name   = "Unknown"
         }
     }
 }
@@ -1418,7 +1431,7 @@ function Show-UIOutput ($Data) {
         }
     }
 
-	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed)"
+	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery:      $($Data.BatteryInfo.Text)"
     Log-Output "Partition:    $($Data.PartitionStyle)"
 	Log-Output "Activision Key: $($Data.ActivisionKey)"
