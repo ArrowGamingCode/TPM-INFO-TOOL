@@ -799,45 +799,13 @@ function Get-TpmEndorsementCertStatus {
     }
 }
 
-function Check-AppUpdateHash {
-    $LocalFilePath = $MyInvocation.MyCommand.Path
-    if (-not $LocalFilePath) {
-        $LocalFilePath = [System.IO.Path]::Combine((Get-Location).Path, "TPM INFO TOOL.cmd")
-    }
-
-    if (-not (Test-Path $LocalFilePath)) { return }
-
-    $ApiUrl = "https://api.github.com/repos/ArrowGamingCode/TPM-INFO-TOOL/contents/TPM%20INFO%20TOOL.cmd"
-
-    try {
-        $FileBytes = [System.IO.File]::ReadAllBytes((Resolve-Path $LocalFilePath))
-        $PrefixBytes = [System.Text.Encoding]::UTF8.GetBytes("blob $($FileBytes.Length)`0")
-
-        $Sha1 = [System.Security.Cryptography.SHA1]::Create()
-        $CombinedBytes = $PrefixBytes + $FileBytes
-        $LocalGitHash = ([System.BitConverter]::ToString($Sha1.ComputeHash($CombinedBytes))).Replace("-", "").ToLower()
-
-        $Headers = @{"User-Agent" = "PowerShell-Update-Checker"}
-        $ApiResponse = Invoke-RestMethod -Uri $ApiUrl -Method Get -TimeoutSec 3 -Headers $Headers -ErrorAction Stop
-
-        if ($ApiResponse -and $ApiResponse.sha) {
-            $OnlineGitHash = $ApiResponse.sha.ToLower()
-        } else {
-            return
-        }
-
-        if ($LocalGitHash -ne $OnlineGitHash) {
-            Write-Host "`n`n`n`n`n"
-            Write-Host "========================= UPDATE AVAILABLE =========================" -ForegroundColor Yellow
-            Write-Host " Please update to latest version here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor Cyan
-            Write-Host "====================================================================`n" -ForegroundColor Yellow
-        }
-    }
-    catch {
-        Write-Host "[!] Network connection timed out or failed. Running tool offline.`n" -ForegroundColor DarkYellow
-    }
+function Show-UpdateMessage {
+	Write-Host "`n`n`n`n`n"
+    Write-Host "===================================================================================" -ForegroundColor Yellow
+    Write-Host " You can check for updates here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor White
+	Write-Host "===================================================================================`n" -ForegroundColor Yellow
 }
-Check-AppUpdateHash
+Show-UpdateMessage
 
 function Get-PowerShellVersion {
     return $PSVersionTable.PSVersion.ToString()
