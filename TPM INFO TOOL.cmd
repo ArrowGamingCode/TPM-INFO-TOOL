@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 48
+$global:TotalSteps   = 49
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -882,6 +882,58 @@ function Get-PcModel {
     }
 }
 
+function Invoke-CodBrokerCycle {
+    $serviceName = 'COD.Broker.Service'
+    $processName = 'cod'
+
+    if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
+        return "False (Game Running)"
+    }
+
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($null -eq $service) {
+        return "False (Service Missing)"
+    }
+
+    try {
+        if ($service.Status -ne 'Running') {
+            Start-Service -Name $serviceName -ErrorAction Stop
+            # Wait up to 3.5 seconds for it to reach Running status
+            $service.WaitForStatus('Running', '00:00:03.5')
+        }
+
+        $service.Refresh()
+
+        if ($service.Status -eq 'Running') {
+            Stop-Service -Name $serviceName -Force -ErrorAction Stop
+            $service.WaitForStatus('Stopped', '00:00:03.5')
+        }
+
+        return "True"
+    }
+    catch [System.ServiceProcess.TimeoutException] {
+        return "False (Timeout / Hung)"
+    }
+    catch {
+        return "False (Service Issue)"
+    }
+}
+
+function Print-CodBrokerCycleStatus {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CycleResult
+    )
+
+    $cleanResult = $CycleResult.Trim()
+
+    if ($cleanResult -eq "True") {
+        Log-Output "[Pass] COD Broker Service Cycled" 'Green'
+    } else {
+        Log-Output "[FAIL] COD Broker Service Cycled: $cleanResult" 'Red'
+    }
+}
+
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -1520,6 +1572,7 @@ function Show-UIOutput ($Data) {
 	} else {
 		Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
 	}
+	Print-CodBrokerCycleStatus -CycleResult $systemData.CodBrokerCycleStatus
 
     if ($Data.BrokerExe) {
         try {
@@ -1743,6 +1796,7 @@ function Invoke-MainExecution {
 		CompatibilityFlags    = $(Step-Progress; Test-CompatibilityFlag)
 		CodBrokerLog          = $(Step-Progress; Get-CallOfDutyLogStatus)
 		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
+		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
     }
 
     Show-UIOutput -Data $systemData
