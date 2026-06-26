@@ -1499,7 +1499,7 @@ function Show-UserRecommendedSteps ($Data) {
 
 	if (!$Data.CodBroker.Passed) {
         Log-Output "-> [FIX REQUIRED] The COD Broker Service is broken" 'Red'
-        Log-Output "Please verify your game files through Steam to force a reinstall." 'White'
+        Log-Output "Please uninstall CoD and then install again." 'White'
         $hasIssues = $true
     }
 
