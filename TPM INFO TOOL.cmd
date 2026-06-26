@@ -1491,19 +1491,15 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
 	if ($Data.doesThirdPartySecurityExist.Passed) {
-        Log-Output "-> A third-party Antivirus was detected!" 'Yellow'
+        Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
         Log-Output "   HOW TO FIX: Temporarily disable the antivirus or whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
         $hasIssues = $true
     }
 
 	if (!$Data.CodBroker.Passed) {
-        Log-Output "-> [FIX REQUIRED] The COD Broker Service is broken, disabled, or missing!" 'Red'
-        Log-Output "   HOW TO FIX:" 'Cyan'
-        Log-Output "     1. Press Windows Key + R, type 'services.msc' and hit Enter." 'White'
-        Log-Output "     2. Scroll down to find 'COD.Broker.Service'." 'White'
-        Log-Output "     3. Right-click it, select Properties, and ensure the Startup Type is set to 'Manual'." 'White'
-        Log-Output "     4. Please verify your game files through Steam to force a reinstall." 'White'
+        Log-Output "-> [FIX REQUIRED] The COD Broker Service is broken" 'Red'
+        Log-Output "Please verify your game files through Steam to force a reinstall." 'White'
         $hasIssues = $true
     }
 
