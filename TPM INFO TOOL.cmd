@@ -1654,7 +1654,7 @@ function Show-UIOutput ($Data) {
     }
 
 	if ($systemData.UACLevel -eq "Default") {
-		Log-Output "[PASS]UAC $($systemData.UACLevel)" Green
+		Log-Output "[PASS] UAC $($systemData.UACLevel)" Green
 	} else {
 		Log-Output "UAC $($systemData.UACLevel)" Yellow
 	}
