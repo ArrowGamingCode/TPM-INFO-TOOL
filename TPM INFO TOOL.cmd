@@ -1490,6 +1490,30 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
+	if ($Data.doesThirdPartySecurityExist.Passed) {
+        Log-Output "-> A third-party Antivirus was detected!" 'Yellow'
+        Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
+        Log-Output "   HOW TO FIX: Temporarily disable the antivirus or whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
+        $hasIssues = $true
+    }
+
+	if (!$Data.CodBroker.Passed) {
+        Log-Output "-> [FIX REQUIRED] The COD Broker Service is broken, disabled, or missing!" 'Red'
+        Log-Output "   HOW TO FIX:" 'Cyan'
+        Log-Output "     1. Press Windows Key + R, type 'services.msc' and hit Enter." 'White'
+        Log-Output "     2. Scroll down to find 'COD.Broker.Service'." 'White'
+        Log-Output "     3. Right-click it, select Properties, and ensure the Startup Type is set to 'Manual'." 'White'
+        Log-Output "     4. Please verify your game files through Steam to force a reinstall." 'White'
+        $hasIssues = $true
+    }
+
+	if ($Data.SecureBoot.Passed -and !$Data.SecureBootType.Passed) {
+        Log-Output "-> [WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
+        Log-Output "   WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
+        Log-Output "   HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
+        $hasIssues = $true
+    }
+
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
     }
