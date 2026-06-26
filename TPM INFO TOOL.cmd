@@ -1485,6 +1485,11 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
+	if (!$Data.CompatibilityFlags.Passed) {
+        Log-Output "-> COD is intended to run without any compatibility or admin flags." 'Yellow'
+        $hasIssues = $true
+    }
+
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
     }
