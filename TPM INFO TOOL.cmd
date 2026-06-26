@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 49
+$global:TotalSteps   = 51
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -895,27 +895,39 @@ function Invoke-CodBrokerCycle {
         return "False (Service Missing)"
     }
 
+    function Watch-ServiceStatus {
+        param (
+            [System.ServiceProcess.ServiceController]$Service,
+            [string]$TargetStatus,
+            [double]$TimeoutSec = 3.5,
+            [double]$IntervalSec = 0.5
+        )
+        $elapsed = 0
+        while ($Service.Status -ne $TargetStatus -and $elapsed -lt $TimeoutSec) {
+            Start-Sleep -Seconds $IntervalSec
+            $elapsed += $IntervalSec
+            $Service.Refresh()
+        }
+        return ($Service.Status -eq $TargetStatus)
+    }
+
     try {
         if ($service.Status -ne 'Running') {
             Start-Service -Name $serviceName -ErrorAction Stop
-            # Wait up to 3.5 seconds for it to reach Running status
-            $service.WaitForStatus('Running', '00:00:03.5')
+            if (-not (Watch-ServiceStatus -Service $service -TargetStatus 'Running')) {
+                return "False (Timeout / Hung on Start)"
+            }
         }
 
-        $service.Refresh()
-
-        if ($service.Status -eq 'Running') {
-            Stop-Service -Name $serviceName -Force -ErrorAction Stop
-            $service.WaitForStatus('Stopped', '00:00:03.5')
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop
+        if (-not (Watch-ServiceStatus -Service $service -TargetStatus 'Stopped')) {
+            return "False (Timeout / Hung on Stop)"
         }
 
         return "True"
     }
-    catch [System.ServiceProcess.TimeoutException] {
-        return "False (Timeout / Hung)"
-    }
     catch {
-        return "False (Service Issue)"
+        return "False (Service Issue: $_)"
     }
 }
 
@@ -1400,6 +1412,37 @@ function Get-CallOfDutyBootstrapperStatus {
     return $Results
 }
 
+function Get-UacStatus {
+    $Path = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+
+    try {
+        $RegistrySettings = Get-ItemProperty -Path $Path -ErrorAction Stop
+        $EnableLUA                 = $RegistrySettings.EnableLUA
+        $ConsentPromptBehaviorAdmin = $RegistrySettings.ConsentPromptBehaviorAdmin
+        $PromptOnSecureDesktop     = $RegistrySettings.PromptOnSecureDesktop
+
+        if ($EnableLUA -eq 0) {
+            return "UAC Disabled"
+        }
+        else {
+            switch ($ConsentPromptBehaviorAdmin) {
+                0 { return "Never Notify" }
+                5 {
+                    if ($PromptOnSecureDesktop -eq 0) {
+                        return "Don't Dim Desktop"
+                    } else {
+                        return "Default"
+                    }
+                }
+                2 { return "Always Notify" }
+                default { return "Custom" }
+            }
+        }
+    } catch {
+        return "Unknown"
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1610,6 +1653,12 @@ function Show-UIOutput ($Data) {
         }
     }
 
+	if ($systemData.UACLevel -eq "Default") {
+		Log-Output "[PASS]UAC $($systemData.UACLevel)" Green
+	} else {
+		Log-Output "UAC $($systemData.UACLevel)" Yellow
+	}
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery:      $($Data.BatteryInfo.Text)"
     Log-Output "Partition:    $($Data.PartitionStyle)"
@@ -1797,6 +1846,7 @@ function Invoke-MainExecution {
 		CodBrokerLog          = $(Step-Progress; Get-CallOfDutyLogStatus)
 		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
 		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
+		UACLevel              = $(Step-Progress; Get-UacStatus)
     }
 
     Show-UIOutput -Data $systemData
