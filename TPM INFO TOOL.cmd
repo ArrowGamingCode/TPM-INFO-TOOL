@@ -1046,13 +1046,23 @@ function Get-Win10SupportStatus {
     }
 }
 
+function Is-Pluton {
+    $plutonCheck = Get-PnpDevice -FriendlyName "*Pluton*" -Status OK -ErrorAction SilentlyContinue
+    return [bool]$plutonCheck
+}
 
+function Test-CertutilPluton {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CertutilText
+    )
 
-
-
-
-
-
+    if ($CertutilText -match "msft-keyid-") {
+        return $true
+    } else {
+        return $false
+    }
+}
 
 function Invoke-TpmLogParser {
     [CmdletBinding()]
@@ -1461,7 +1471,7 @@ function Get-UacStatus {
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
 
-function Show-UserRecommendedSteps ($Data) {
+function Show-UserRecommendedSteps ($Data, $isOverallPass, $Pluton) {
     Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
     $hasIssues = $false
 
@@ -1525,6 +1535,11 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
+	if ($Pluton -and -not $isOverallPass) {
+        Log-Output "-> [WARNING] This PC uses a Pluton TPM, can it be turned off in the BIOS?" 'Yellow'
+        $hasIssues = $true
+    }
+
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
     }
@@ -1583,7 +1598,7 @@ function Show-UIOutput ($Data) {
     if ($TestFile -and (Test-Path $TestFile)) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
-        $certRaw = certreq -enrollaik -config '""' 2>&1 | Out-String
+        $certRaw = certreq -enrollaik -f -config '""' 2>&1 | Out-String
     }
 	Write-Progress -Activity "Loading System Diagnostics" -Completed
 
@@ -1730,6 +1745,11 @@ function Show-UIOutput ($Data) {
     }
 
     Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
+
+	$Pluton = ${Test-CertutilPluton -CertutilText $certRaw} -or ${Is-Pluton}
+	if ($Pluton){
+		Log-Output "RESULT: Pluton detected" 'DarkYellow'
+	}
 
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
     Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
@@ -1887,4 +1907,4 @@ function Invoke-MainExecution {
 }
 
 $Data = Invoke-MainExecution
-Show-UserRecommendedSteps -Data $Data -isOverallPass $isOverallPass
+Show-UserRecommendedSteps -Data $Data -isOverallPass $isOverallPass -Pluton $Pluton
