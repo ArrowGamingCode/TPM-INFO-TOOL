@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.4"
+set "TPM_TOOL_VERSION=1.0.5"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -242,6 +242,12 @@ function Get-SecureBootKeysType {
         KEK = Get-SingleKeyType 'KEK'
         DB  = Get-SingleKeyType 'db'
     }
+}
+
+function Get-OverallPassStatus ($enrollSuccess, $Data) {
+	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
+							#(unsure if all system work with this -and $Data.LocalAttest
+    return ($enrollSuccess -and $criticalHardwarePass)
 }
 
 function Get-MicrosoftCaStatus {
@@ -1498,9 +1504,10 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
-	if ($Data.doesThirdPartySecurityExist.Passed) {
+	if ($Data.doesThirdPartySecurityExist.Passed -and -not $isOverallPass) {
         Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
+		Log-Output "   WHEN: If you have problems."
         Log-Output "   HOW TO FIX: Temporarily disable the antivirus or whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
         $hasIssues = $true
     }
@@ -1527,11 +1534,11 @@ function Show-UserRecommendedSteps ($Data) {
 # UI RENDERING PIPELINE
 # =========================================================================
 
-function Show-Banner ($enrollSuccess, $criticalHardwarePass, [switch]$ConsoleOnly) {
+function Show-Banner ($isOverallPass, [switch]$ConsoleOnly) {
     $LogCmd = if ($ConsoleOnly) { { param($msg, $color) Write-Host $msg -ForegroundColor $color } }
               else { { param($msg, $color) Log-Output $msg $color } }
 
-    if ($enrollSuccess -and $criticalHardwarePass) {
+    if ($isOverallPass) {
         $statusText = "PASS"
         $color      = "Green"
         $padding    = " " * 17
@@ -1585,12 +1592,9 @@ function Show-UIOutput ($Data) {
 	if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
         $enrollSuccess = $false
     }
-
-	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
-							#(unsure if all system work with this -and $Data.LocalAttest
-
     Clear-Host
-    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -ConsoleOnly
+	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
+    Show-Banner -isOverallPass $isOverallPass -ConsoleOnly
 
     Log-Output "TPM INFO TOOL - $ScriptVersion - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -1780,13 +1784,13 @@ function Show-UIOutput ($Data) {
 	#Print-PCRTable
 	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
 
-    Show-Banner -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass
+    Show-Banner -isOverallPass $isOverallPass
 
 	if (-not ($enrollSuccess)) {
 		Log-Output "EnrollSuccess Fail." 'Red'
 	}
 
-    if (-not ($enrollSuccess -and $criticalHardwarePass)) {
+    if (-not ($isOverallPass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
 		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
 
@@ -1883,4 +1887,4 @@ function Invoke-MainExecution {
 }
 
 $Data = Invoke-MainExecution
-Show-UserRecommendedSteps -Data $Data
+Show-UserRecommendedSteps -Data $Data -isOverallPass $isOverallPass
