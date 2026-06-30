@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 51
+$global:TotalSteps   = 50
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -389,52 +389,76 @@ function Get-CodBrokerStatus {
     }
 }
 
-function Get-randgridRegistryAndDriverInfo {
+function Get-RandgridRegistryAndDriverInfo {
     $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-    $regKey  = $baseKey.OpenSubKey('SYSTEM\CurrentControlSet\Services\atvi-randgrid_sr')
 
-    $results = [PSCustomObject]@{
-        RegKeyExists       = $null -ne $regKey
-        FirstChars         = 'N/A'
-        RandgridFileExists = $false
+    $platforms = @{
+        'Steam'      = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid_sr'
+        'Xbox/Store' = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid_msstore'
+        'Battle.net' = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid'
     }
 
-    if ($results.RegKeyExists) {
-        $imagePath = $regKey.GetValue('ImagePath')
-         if ($imagePath) {
-            $results.FirstChars = if ($imagePath.Length -ge 5) { $imagePath.Substring(4,2) } else { $imagePath }
-            $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
-            if ($cleanPath -notmatch '^[A-Za-z]:') { $cleanPath = Join-Path $env:SystemRoot $cleanPath }
-            if (Test-Path $cleanPath) { $results.RandgridFileExists = $true }
-         }
-        $regKey.Close()
-    }
-    $baseKey.Close()
-    return $results
-}
+    $allResults = @()
+    $foundList  = @()
+    $charsList  = @()
 
-function Get-XboxRandgridInfo {
-    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-    $regKey  = $baseKey.OpenSubKey('SYSTEM\CurrentControlSet\Services\atvi-randgrid_xbr')
+    foreach ($platform in $platforms.Keys) {
+        $subKeyPath = $platforms[$platform]
+        $regKey     = $baseKey.OpenSubKey($subKeyPath)
 
-    $results = [PSCustomObject]@{
-        RegKeyExists       = $null -ne $regKey
-        FirstChars         = 'N/A'
-        RandgridFileExists = $false
-    }
-
-     if ($results.RegKeyExists) {
-        $imagePath = $regKey.GetValue('ImagePath')
-        if ($imagePath) {
-            $results.FirstChars = if ($imagePath.Length -ge 5) { $imagePath.Substring(4,2) } else { $imagePath }
-            $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
-            if ($cleanPath -notmatch '^[A-Za-z]:') { $cleanPath = Join-Path $env:SystemRoot $cleanPath }
-             if (Test-Path $cleanPath) { $results.RandgridFileExists = $true }
+        $results = [PSCustomObject]@{
+            Platform           = $platform
+            RegKeyExists       = $null -ne $regKey
+            FirstChars         = 'N/A'
+            ImagePath          = 'N/A'
+            RandgridFileExists = $false
+            PlatformsFound     = 'None'
         }
-        $regKey.Close()
+
+        if ($results.RegKeyExists) {
+            $foundList += $platform
+            $imagePath = $regKey.GetValue('ImagePath')
+            if ($imagePath) {
+                $results.ImagePath  = $imagePath
+                $results.FirstChars = if ($imagePath.Length -ge 5) { $imagePath.Substring(4,2) } else { $imagePath }
+                $charsList += $results.FirstChars
+
+                $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
+
+                if ($cleanPath -notmatch '^[A-Za-z]:') {
+                    $cleanPath = Join-Path $env:SystemRoot $cleanPath
+                }
+
+                if (Test-Path $cleanPath) {
+                    $results.RandgridFileExists = $true
+                }
+            }
+            $regKey.Close()
+        }
+        $allResults += $results
     }
+
     $baseKey.Close()
-    return $results
+
+    $platformsString = if ($foundList.Count -gt 0) {
+        ($foundList | ForEach-Object { $_.Substring(0,1) }) -join ', '
+    } else {
+        'None'
+    }
+
+    $allCharsString = if ($charsList.Count -gt 0) {
+        ($charsList | Select-Object -Unique) -join ' '
+    } else {
+        'N/A'
+    }
+
+    return [PSCustomObject]@{
+        RegKeyExists       = @($allResults | Where-Object { $_.RegKeyExists }).Count -gt 0
+        RandgridFileExists = @($allResults | Where-Object { $_.RandgridFileExists }).Count -gt 0
+        FirstChars         = $allCharsString
+        PlatformsFound     = $platformsString
+        AllPlatforms       = $allResults
+    }
 }
 
 function Get-PlatformInstallStatus {
@@ -924,7 +948,7 @@ function Print-CodBrokerCycleStatus {
     $cleanResult = $CycleResult.Trim()
 
     if ($cleanResult -eq "True") {
-        Log-Output "[Pass] COD Broker Service Cycled" 'Green'
+        Log-Output "[PASS] COD Broker Service Cycled" 'Green'
     } else {
         Log-Output "[FAIL] COD Broker Service Cycled: $cleanResult" 'Red'
     }
@@ -1637,21 +1661,18 @@ function Show-UIOutput ($Data) {
         Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow' 
     }
 
-    if ($Data.Randgrid.RegKeyExists) {
-        Log-Output 'RESULT: randgrid Registry Key Exists (Pass)' 'Green'
-    } else {
-        Log-Output 'CRITICAL: randgrid Registry Key Missing (Fail)' 'Red'
-    }
-    if ($Data.Randgrid.RandgridFileExists) {
-		Log-Output 'RESULT: randgrid.sys Driver Found (Pass)' 'Green'
+	if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
+		Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)]" 'Green'
 	} else {
-		Log-Output 'CRITICAL: randgrid.sys Driver File Missing from Path (Fail)' 'Red'
+		if (-not $Data.Randgrid.RegKeyExists) {
+			Log-Output 'CRITICAL: Randgrid Registry Key Missing' 'Red'
+		}
+
+		if (-not $Data.Randgrid.RandgridFileExists) {
+			Log-Output 'CRITICAL: Randgrid.sys File Missing from Path' 'Red'
+		}
 	}
 
-    if ($Data.XboxRandgrid.RegKeyExists) {
-        Log-Output 'RESULT: Xbox randgrid' 'Green'
-    }
-	
     if ($Data.CompatibilityFlags.Passed) {
         Log-Output "[PASS] Compatibility flags are clear." 'Green'
     } else {
@@ -1830,7 +1851,6 @@ function Invoke-MainExecution {
 		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
 		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
 		Randgrid              = $(Step-Progress; Get-randgridRegistryAndDriverInfo)
-		XboxRandgrid          = $(Step-Progress; Get-XboxRandgridInfo)
 		BrokerExe             = $(Step-Progress; Test-Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe')
 		BatteryInfo           = $(Step-Progress; Get-BatteryStatus)
 		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
