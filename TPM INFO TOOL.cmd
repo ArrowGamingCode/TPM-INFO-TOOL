@@ -439,48 +439,41 @@ function Get-XboxRandgridInfo {
 
 function Get-PlatformInstallStatus {
     $steamInstalled = $false
-    $steamPath = ""
+    $steamPath      = ""
+    $bnetInstalled  = $false
+    $bnetPath       = ""
 
-    $steamReg = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam" -Name "InstallPath" -ErrorAction SilentlyContinue
+    $steamRegKey = "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam"
+    if (Test-Path $steamRegKey) {
+        $steamReg = Get-ItemProperty -Path $steamRegKey -Name "InstallPath" -ErrorAction SilentlyContinue
+        if ($steamReg -and $steamReg.InstallPath) {
+            $libraryPaths = [System.Collections.Generic.List[string]]::new()
+            $libraryPaths.Add($steamReg.InstallPath)
 
-    if ($steamReg) {
-        $primaryHQ = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty HQ"
-        $primaryLegacy = Join-Path $steamReg.InstallPath "steamapps\common\Call of Duty"
-
-        if (Test-Path (Join-Path $primaryHQ "bootstrapper.exe")) {
-            $steamPath = $primaryHQ
-            $steamInstalled = $true
-        } elseif (Test-Path (Join-Path $primaryLegacy "bootstrapper.exe")) {
-            $steamPath = $primaryLegacy
-            $steamInstalled = $true
-        }
-    }
-
-    if (-not $steamInstalled) {
-        $drives = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
-        foreach ($d in $drives) {
-            $testPath = Join-Path $d.DeviceID "SteamLibrary\steamapps\common\Call of Duty HQ"
-            if (Test-Path (Join-Path $testPath "bootstrapper.exe")) {
-                $steamPath = $testPath
-                $steamInstalled = $true
-                break
+            $vdfPath = Join-Path $steamReg.InstallPath "config\libraryfolders.vdf"
+            if (Test-Path $vdfPath) {
+                $vdfContent = Get-Content $vdfPath -ErrorAction SilentlyContinue
+                foreach ($line in $vdfContent) {
+                    if ($line -match '"path"\s+"([^"]+)"') {
+                        $cleanPath = $Matches[1].Replace("\\", "\")
+                        if ($libraryPaths -notcontains $cleanPath) { $libraryPaths.Add($cleanPath) }
+                    }
+                }
             }
-        }
 
-        if (-not $steamInstalled) {
-            foreach ($d in $drives) {
-                $testPath2 = Join-Path $d.DeviceID "SteamLibrary\steamapps\common\Call of Duty"
-                if (Test-Path (Join-Path $testPath2 "bootstrapper.exe")) {
-                    $steamPath = $testPath2
-                    $steamInstalled = $true
-                    break
+            $steamSubDirs = @("steamapps\common\Call of Duty HQ")
+            :steamSearch foreach ($lib in $libraryPaths) {
+                foreach ($subDir in $steamSubDirs) {
+                    $checkPath = Join-Path $lib $subDir
+                    if (Test-Path (Join-Path $checkPath "bootstrapper.exe")) {
+                        $steamPath      = $checkPath
+                        $steamInstalled = $true
+                        break steamSearch
+                    }
                 }
             }
         }
     }
-
-    $bnetInstalled = $false
-    $bnetPath = ""
 
     $bnetRegPaths = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Call of Duty",
@@ -490,26 +483,17 @@ function Get-PlatformInstallStatus {
     foreach ($path in $bnetRegPaths) {
         if (Test-Path $path) {
             $bnetReg = Get-ItemProperty -Path $path -Name "InstallLocation" -ErrorAction SilentlyContinue
-            if ($bnetReg -and (Test-Path $bnetReg.InstallLocation)) {
-                $bnetPath = $bnetReg.InstallLocation
-                $bnetInstalled = $true
-                break
-            }
-        }
-    }
+            if ($bnetReg -and $bnetReg.InstallLocation -and (Test-Path $bnetReg.InstallLocation)) {
+                $locPath = $bnetReg.InstallLocation
 
-    if (-not $bnetInstalled) {
-        $defaultBnetPaths = @(
-            "${env:ProgramFiles}\Call of Duty HQ",
-            "${env:ProgramFiles}\Call of Duty",
-            "${env:ProgramFiles(x86)}\Call of Duty HQ",
-            "${env:ProgramFiles(x86)}\Call of Duty"
-        )
-        foreach ($path in $defaultBnetPaths) {
-            if (Test-Path (Join-Path $path "bootstrapper.exe")) {
-                $bnetPath = $path
-                $bnetInstalled = $true
-                break
+                $exeFile = Get-ChildItem -Path $locPath -Filter "bootstrapper.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+
+                if ($exeFile) {
+                    $foundPath = $exeFile.DirectoryName
+                    $bnetPath      = $foundPath
+                    $bnetInstalled = $true
+                    break
+                }
             }
         }
     }
