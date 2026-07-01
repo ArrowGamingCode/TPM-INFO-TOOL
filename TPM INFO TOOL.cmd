@@ -764,17 +764,15 @@ function Get-BitLockerStatus {
 
 function Get-IntelMeVersion {
     try {
-        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver |
-            Where-Object { $_.DeviceName -like "*Intel*Management Engine*" } | Select-Object -First 1
+        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Intel%Management Engine%'" |
+            Select-Object -First 1
 
         if ($meDriver -and $meDriver.DriverVersion) {
             if ($meDriver.DriverDate) {
-                $rawDate = $meDriver.DriverDate
-                $formattedDate = "{0}-{1}-{2}" -f $rawDate.Year, $rawDate.Month.ToString("00"), $rawDate.Day.ToString("00")
                 return [PSCustomObject]@{
                     Version = $meDriver.DriverVersion
-                    Date    = $formattedDate
-                    RawDate = [datetime]$rawDate
+                    Date    = $meDriver.DriverDate.ToString("yyyy-MM-dd")
+                    RawDate = [datetime]$meDriver.DriverDate
                 }
             } else {
                 return [PSCustomObject]@{
