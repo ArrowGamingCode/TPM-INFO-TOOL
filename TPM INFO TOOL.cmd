@@ -1467,11 +1467,35 @@ function Get-UacStatus {
     }
 }
 
+function Get-CertreqAttestation($Data) {
+	Write-Host "Testing Certreq.." -ForegroundColor White
+    if ($TestFile -and (Test-Path $TestFile)) {
+        $certRaw = Get-Content $TestFile -Raw
+    } else {
+        $certRaw = certreq -enrollaik -f -config '""' 2>&1 | Out-String
+    }
+	Write-Progress -Activity "Loading System Diagnostics" -Completed
+
+    $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
+	$enrollSuccess = $certRaw -match $successPatterns
+	if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
+        $enrollSuccess = $false
+    }
+
+	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
+
+    return [PSCustomObject]@{
+        CertRaw       = $certRaw
+        IsOverallPass = $isOverallPass
+		EnrollSuccess = $enrollSuccess
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
 
-function Show-UserRecommendedSteps ($Data, $isOverallPass, $Pluton) {
+function Show-UserRecommendedSteps ($Data) {
     Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
     $hasIssues = $false
 
@@ -1514,7 +1538,7 @@ function Show-UserRecommendedSteps ($Data, $isOverallPass, $Pluton) {
         $hasIssues = $true
     }
 
-	if ($Data.doesThirdPartySecurityExist.Passed -and -not $isOverallPass) {
+	if ($Data.doesThirdPartySecurityExist.Passed -and $Data.isOverallPass) {
         Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
 		Log-Output "   WHEN: If you have problems."
@@ -1535,7 +1559,7 @@ function Show-UserRecommendedSteps ($Data, $isOverallPass, $Pluton) {
         $hasIssues = $true
     }
 
-	if ($Pluton -and -not $isOverallPass) {
+	if ($Data.Pluton -and -not $Data.isOverallPass) {
         Log-Output "-> [WARNING] This PC uses a Pluton TPM, can it be turned off in the BIOS?" 'Yellow'
         $hasIssues = $true
     }
@@ -1593,23 +1617,9 @@ function PrintLargeOverallResult ($result) {
 }
 
 function Show-UIOutput ($Data) {
-	Step-Progress
-	Write-Host "Testing Certreq.." -ForegroundColor White
-    if ($TestFile -and (Test-Path $TestFile)) {
-        $certRaw = Get-Content $TestFile -Raw
-    } else {
-        $certRaw = certreq -enrollaik -f -config '""' 2>&1 | Out-String
-    }
-	Write-Progress -Activity "Loading System Diagnostics" -Completed
-
-    $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
-	$enrollSuccess = $certRaw -match $successPatterns
-	if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
-        $enrollSuccess = $false
-    }
     Clear-Host
-	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
-    Show-Banner -isOverallPass $isOverallPass -ConsoleOnly
+
+    Show-Banner -isOverallPass $Data.isOverallPass -ConsoleOnly
 
     Log-Output "TPM INFO TOOL - $ScriptVersion - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -1746,8 +1756,7 @@ function Show-UIOutput ($Data) {
 
     Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
 
-	$Pluton = ${Test-CertutilPluton -CertutilText $certRaw} -or ${Is-Pluton}
-	if ($Pluton){
+	if ($Data.Pluton){
 		Log-Output "RESULT: Pluton detected" 'DarkYellow'
 	}
 
@@ -1757,7 +1766,7 @@ function Show-UIOutput ($Data) {
     Log-Output "Authorized DB Key:         $($Data.SbKeys.DB)"
     Log-Output ""
 
-    $certOut = $certRaw | Protect-AIKPrivacy
+    $certOut = $Data.certRaw | Protect-AIKPrivacy
     Write-Host $certOut
     $global:ClipboardBuffer += $certOut
 
@@ -1804,18 +1813,18 @@ function Show-UIOutput ($Data) {
 	#Print-PCRTable
 	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
 
-    Show-Banner -isOverallPass $isOverallPass
+    Show-Banner -isOverallPass $Data.isOverallPass
 
-	if (-not ($enrollSuccess)) {
+	if (-not ($Data.EnrollSuccess)) {
 		Log-Output "EnrollSuccess Fail." 'Red'
 	}
 
-    if (-not ($isOverallPass)) {
+    if (-not ($Data.isOverallPass)) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
 		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
 
-        if ($certRaw) {
-            $certRaw -split "`r?`n" | ForEach-Object {
+        if ($Data.certRaw) {
+            $Data.certRaw -split "`r?`n" | ForEach-Object {
                 if ($_ -match '^\s*\{\s*"Message"\s*:') {
                     try {
                         $jsonObject = $_ | ConvertFrom-Json
@@ -1902,9 +1911,17 @@ function Invoke-MainExecution {
 		UACLevel              = $(Step-Progress; Get-UacStatus)
     }
 
+	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
+	$Pluton = ${Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw} -or ${Is-Pluton}
+
+	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.certRaw
+	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.isOverallPass
+	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
+	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
+
     Show-UIOutput -Data $systemData
 	return $systemData
 }
 
 $Data = Invoke-MainExecution
-Show-UserRecommendedSteps -Data $Data -isOverallPass $isOverallPass -Pluton $Pluton
+Show-UserRecommendedSteps -Data $Data
