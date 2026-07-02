@@ -64,6 +64,12 @@ $ScriptVersion = $env:TPM_TOOL_VERSION
 # FUNCTIONS
 # =========================================================================
 
+function Start-TPM-Maintenance {
+	#Read TPM from nvram.
+	Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
+}
+Start-TPM-Maintenance
+
 function Step-Progress {
     $global:ProgressStep++
     $PercentComplete = [math]::Min(100, [int](($global:ProgressStep / $global:TotalSteps) * 100))
