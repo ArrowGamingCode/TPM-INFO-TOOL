@@ -1544,6 +1544,22 @@ function Get-LiveTpmKeyId {
     return $false
 }
 
+function Get-CODBrokerInfo {
+    $filePath = 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe'
+
+    if (Test-Path -Path $filePath) {
+        $brokerVersion = (Get-ItemProperty -Path $filePath).VersionInfo.FileVersion
+        $md5Short      = (Get-FileHash -Path $filePath -Algorithm MD5).Hash.Substring(0, 2)
+
+        [PSCustomObject]@{
+            Version     = $brokerVersion
+            MD5ShortHex = $md5Short
+        }
+    } else {
+        return $null
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1732,16 +1748,11 @@ function Show-UIOutput ($Data) {
 	}
 	Print-CodBrokerCycleStatus -CycleResult $systemData.CodBrokerCycleStatus
 
-    if ($Data.BrokerExe) {
-        try {
-            $brokerVersion = (Get-ItemProperty -Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe').VersionInfo.FileVersion
-            Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$brokerVersion) (Pass)" 'Green'
-        } catch {
-            Log-Output 'RESULT: CODBrokerService.exe Binary Exists (Version Unreadable) (Pass)' 'Green'
-        }
-    } else {
-        Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow' 
-    }
+	if ($Data.BrokerExe) {
+		Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$($Data.BrokerExe.Version)) [$($Data.BrokerExe.MD5ShortHex)] (Pass)" 'Green'
+	} else {
+		Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow'
+	}
 
 	if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
 		Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)] : [$($Data.Randgrid.AllMd5s)]" 'Green'
@@ -1938,7 +1949,7 @@ function Invoke-MainExecution {
 		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
 		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
 		Randgrid              = $(Step-Progress; Get-randgridRegistryAndDriverInfo)
-		BrokerExe             = $(Step-Progress; Test-Path 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe')
+		BrokerExe             = $(Step-Progress; Get-CODBrokerInfo)
 		BatteryInfo           = $(Step-Progress; Get-BatteryStatus)
 		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
 		CoreIsolation         = $(Step-Progress; Get-CoreIsolationHardwareStatus)
