@@ -1738,7 +1738,6 @@ function Show-UIOutput ($Data) {
         Log-Output "Local Attestation: FAILED / NOT SUPPORTED" 'Red'
     }
 
-	Log-Output "COD Broker:   $($Data.CodBroker.Text) (StartType: $($Data.CodBroker.StartType))"
 	if ($Data.CodBroker.StartType -eq 'Automatic') {
 		Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
 	} elseif ($Data.CodBroker.Passed) {
