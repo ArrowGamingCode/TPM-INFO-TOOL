@@ -413,6 +413,7 @@ function Get-RandgridRegistryAndDriverInfo {
     $allResults = @()
     $foundList  = @()
     $charsList  = @()
+	$md5List    = @()
 
     foreach ($platform in $platforms.Keys) {
         $subKeyPath = $platforms[$platform]
@@ -424,7 +425,7 @@ function Get-RandgridRegistryAndDriverInfo {
             FirstChars         = 'N/A'
             ImagePath          = 'N/A'
             RandgridFileExists = $false
-            PlatformsFound     = 'None'
+			Md5Hash            = ''
         }
 
         if ($results.RegKeyExists) {
@@ -432,7 +433,7 @@ function Get-RandgridRegistryAndDriverInfo {
             $imagePath = $regKey.GetValue('ImagePath')
             if ($imagePath) {
                 $results.ImagePath  = $imagePath
-                $results.FirstChars = if ($imagePath.Length -ge 5) { $imagePath.Substring(4,2) } else { $imagePath }
+				$results.FirstChars = if ($imagePath.Length -ge 6) { $imagePath.Substring(4,2) } else { $imagePath }
                 $charsList += $results.FirstChars
 
                 $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
@@ -443,6 +444,12 @@ function Get-RandgridRegistryAndDriverInfo {
 
                 if (Test-Path $cleanPath) {
                     $results.RandgridFileExists = $true
+						try {
+							$hash = (Get-FileHash -Path $cleanPath -Algorithm MD5).Hash.Substring(0, 2)
+							$results.Md5Hash = $hash
+							$md5List += $hash
+						} catch {
+						}
                 }
             }
             $regKey.Close()
@@ -464,12 +471,19 @@ function Get-RandgridRegistryAndDriverInfo {
         'N/A'
     }
 
+	$allMd5sString = if ($md5List.Count -gt 0) {
+        ($md5List | Select-Object -Unique) -join ' '
+    } else {
+        ''
+    }
+
     return [PSCustomObject]@{
         RegKeyExists       = @($allResults | Where-Object { $_.RegKeyExists }).Count -gt 0
         RandgridFileExists = @($allResults | Where-Object { $_.RandgridFileExists }).Count -gt 0
         FirstChars         = $allCharsString
         PlatformsFound     = $platformsString
         AllPlatforms       = $allResults
+		AllMd5s            = $allMd5sString
     }
 }
 
@@ -1730,7 +1744,7 @@ function Show-UIOutput ($Data) {
     }
 
 	if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
-		Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)]" 'Green'
+		Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)] : [$($Data.Randgrid.AllMd5s)]" 'Green'
 	} else {
 		if (-not $Data.Randgrid.RegKeyExists) {
 			Log-Output 'CRITICAL: Randgrid Registry Key Missing' 'Red'
