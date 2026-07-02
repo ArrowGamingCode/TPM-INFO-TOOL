@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 50
+$global:TotalSteps   = 51
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1289,9 +1289,15 @@ function Test-SecurityCompliance {
 }
 
 
-function Show-TcgAttestationAudit ($TcgData) {
+function Show-TcgAttestationAudit ($Data) {
+	$TcgData =  $Data.MeasuredBootCompliance
+
     Log-Output "--- MEASURED BOOT BINARY AUDIT (EXPERIMENTAL) ---" 'Cyan'
 	Show-PCR_Message
+
+	if($Data.ComparedKeyId){
+		Log-Output $Data.ComparedKeyId
+	}
 
 	if ($TcgData) {
 		Log-Output "SecureBoot State: $($TcgData.SecureBootState)"
@@ -1487,6 +1493,35 @@ function Get-CertreqAttestation($Data) {
         IsOverallPass = $isOverallPass
 		EnrollSuccess = $enrollSuccess
     }
+}
+
+function Compare-TpmKeyId {
+    param (
+        [string]$certData,
+        [string]$tpmKeyId
+    )
+
+	if ($certData -match '-KeyId-([a-f0-9]+)') {
+		$certKeyId = $Matches[1]
+	}
+
+    if ($certKeyId -eq $tpmKeyId) {
+        return "Key Comp: Pass"
+    }
+
+    return $false
+}
+
+function Get-LiveTpmKeyId {
+    $certData = certutil -silent -v -tpmInfo 2>$null | Out-String
+
+    $pattern = 'KeyID\s*=\s*(?<id>[A-Fa-f0-9]{6,})'
+
+    if ($certData -match $pattern) {
+        return $Matches['id']
+    }
+
+    return $false
 }
 
 # =========================================================================
@@ -1809,7 +1844,8 @@ function Show-UIOutput ($Data) {
 	Log-Output ""
 
 	#Print-PCRTable
-	Show-TcgAttestationAudit -TcgData $Data.MeasuredBootCompliance
+
+	Show-TcgAttestationAudit -Data $Data
 
     Show-Banner -isOverallPass $Data.isOverallPass
 
@@ -1907,15 +1943,18 @@ function Invoke-MainExecution {
 		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
 		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
 		UACLevel              = $(Step-Progress; Get-UacStatus)
+		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
-	$Pluton = ${Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw} -or ${Is-Pluton}
+	$Pluton             = ${Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw} -or ${Is-Pluton}
+	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.certRaw -tpmKeyId $systemData.LiveTpmKeyId
 
 	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.certRaw
 	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.isOverallPass
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
+	$systemData | Add-Member -NotePropertyName "ComparedKeyId" -NotePropertyValue $ComparedKeyId
 
     Show-UIOutput -Data $systemData
 	return $systemData
