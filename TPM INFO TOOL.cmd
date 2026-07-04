@@ -350,21 +350,26 @@ function Get-TpmOwnershipState {
         $tpmCmd = Get-Tpm -ErrorAction SilentlyContinue
         if ($tpmCmd) {
             $isReady = $tpmCmd.TpmReady
-            $statusText = "Ready: $isReady, Present: $($tpmCmd.TpmPresent)"
+            $pendingRestart = [bool]$tpmCmd.RestartPending
+            $statusText = "Ready: $isReady, Present: $($tpmCmd.TpmPresent), PendingRestart: $pendingRestart"
+
             return [PSCustomObject]@{
-                Text   = $statusText
-                Passed = $isReady
+                Text           = $statusText
+                Passed         = $isReady
+                PendingRestart = $pendingRestart
             }
         } else {
             return [PSCustomObject]@{
-                Text   = "Unable to read TPM Ownership properties via Get-Tpm"
-                Passed = $false
+                Text           = "Unable to read TPM Ownership properties via Get-Tpm"
+                Passed         = $false
+                PendingRestart = $null
             }
         }
     } catch {
         return [PSCustomObject]@{
-            Text   = "Error executing TPM Ownership query"
-            Passed = $false
+            Text           = "Error executing TPM Ownership query"
+            Passed         = $false
+            PendingRestart = $null
         }
     }
 }
