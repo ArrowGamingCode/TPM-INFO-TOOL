@@ -983,6 +983,26 @@ function Print-CodBrokerCycleStatus {
     }
 }
 
+function Check-CodBrokerService {
+    param (
+        [Parameter(Mandatory = $true)]
+        $Data
+    )
+
+    if ($Data.CodBroker -and $Data.CodBroker.StartType -eq 'Disabled') {
+        Write-Host "`n=========================================================================" -ForegroundColor Yellow
+        Write-Host "[!] COD Broker Service is currently Disabled." -ForegroundColor Yellow
+        $choice = Read-Host "Would you like to attempt to repair it now? [Y/N]"
+
+        if ($choice -match '^[Yy]') {
+            try {
+                Set-Service -Name 'COD.Broker.Service' -StartupType Manual -ErrorAction Stop
+            } catch {
+            }
+        }
+    }
+}
+
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -2013,3 +2033,4 @@ function Invoke-MainExecution {
 
 $Data = Invoke-MainExecution
 Show-UserRecommendedSteps -Data $Data
+Check-CodBrokerService -Data $Data
