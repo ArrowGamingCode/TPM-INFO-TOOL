@@ -350,8 +350,8 @@ function Get-TpmOwnershipState {
         $tpmCmd = Get-Tpm -ErrorAction SilentlyContinue
         if ($tpmCmd) {
             $isReady = $tpmCmd.TpmReady
-            $pendingRestart = [bool]$tpmCmd.RestartPending
-            $statusText = "Ready: $isReady, Present: $($tpmCmd.TpmPresent), PendingRestart: $pendingRestart"
+            $pendingRestart = if ($tpmCmd.RestartPending) { "." } else { "" }
+            $statusText = "Ready: $isReady, Present: $($tpmCmd.TpmPresent)$pendingRestart"
 
             return [PSCustomObject]@{
                 Text           = $statusText
