@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 51
+$global:TotalSteps   = 52
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1565,6 +1565,17 @@ function Get-CODBrokerInfo {
     }
 }
 
+function Test-TPMSha256Support {
+    $path = "HKLM:\SYSTEM\CurrentControlSet\Control\IntegrityServices"
+    if (Test-Path $path) {
+        $value = Get-ItemPropertyValue -Path $path -Name "TPMActivePCRBanks" -ErrorAction SilentlyContinue
+        if ($null -ne $value) {
+            return [bool]($value -band 0x00000002)
+        }
+    }
+    return $false
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1786,6 +1797,10 @@ function Show-UIOutput ($Data) {
 		Log-Output "UAC $($systemData.UACLevel)" Yellow
 	}
 
+	if ($systemData.Sha256 -eq $false) {
+		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
+	}
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery:      $($Data.BatteryInfo.Text)"
     Log-Output "Partition:    $($Data.PartitionStyle)"
@@ -1979,6 +1994,7 @@ function Invoke-MainExecution {
 		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
 		UACLevel              = $(Step-Progress; Get-UacStatus)
 		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
+		Sha256                = $(Step-Progress; Test-TPMSha256Support)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
