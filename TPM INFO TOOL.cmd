@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 52
+$global:TotalSteps   = 53
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1596,6 +1596,32 @@ function Test-TPMSha256Support {
     return $false
 }
 
+function Get-IsMSI {
+    [CmdletBinding()]
+    param()
+
+    $data = [ordered]@{
+        ComputerSystem = (Get-CimInstance Win32_ComputerSystem).Manufacturer
+        BaseBoard      = (Get-CimInstance Win32_BaseBoard).Manufacturer
+        BIOS           = (Get-CimInstance Win32_BIOS).Manufacturer
+        Enclosure      = (Get-CimInstance Win32_SystemEnclosure).Manufacturer
+    }
+
+    $normalized = $data.GetEnumerator() | ForEach-Object {
+        [PSCustomObject]@{
+            Source       = $_.Key
+            Manufacturer = ($_.Value -as [string]).Trim().ToUpper()
+        }
+    }
+
+    $pattern = 'MSI|MICRO-STAR'
+    $isMSI = $normalized.Manufacturer -match $pattern
+
+    [PSCustomObject]@{
+        IsMSI          = ($isMSI.Count -gt 0)
+    }
+}
+
 # =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
@@ -1665,8 +1691,13 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
 	if ($Data.Pluton -and -not $Data.isOverallPass) {
-        Log-Output "-> [WARNING] This PC uses a Pluton TPM, can it be turned off in the BIOS?" 'Yellow'
+        Log-Output "-> [WARNING] This PC uses a Pluton TPM (whitch often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
+		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
         $hasIssues = $true
+
+		if ($Data.IsMSI){
+			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
+		}
     }
 
     if (!$hasIssues) {
@@ -2015,6 +2046,7 @@ function Invoke-MainExecution {
 		UACLevel              = $(Step-Progress; Get-UacStatus)
 		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
 		Sha256                = $(Step-Progress; Test-TPMSha256Support)
+		IsMSI                 = $(Step-Progress; Get-IsMSI)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
