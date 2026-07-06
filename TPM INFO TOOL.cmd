@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 53
+$global:TotalSteps   = 54
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -749,6 +749,126 @@ function Get-PCR {
        tpmtool parsetcglogs -validate |
          Where-Object { $_ -match '^\|\s*PCR' } |
          ForEach-Object { $_.Trim(" |!`r`n") }
+    }
+}
+
+$KeyName = "TPM_INFO_TOOL_KEY"
+$CngProvider = New-Object System.Security.Cryptography.CngProvider("Microsoft Platform Crypto Provider")
+
+function Remove-TpmKey {
+    param (
+        [string]$KeyName = $script:KeyName
+    )
+
+    if ([System.Security.Cryptography.CngKey]::Exists($KeyName, $script:CngProvider)) {
+        try {
+            $KeyToDelete = [System.Security.Cryptography.CngKey]::Open($KeyName, $script:CngProvider)
+            $KeyToDelete.Delete()
+        } catch {
+            Write-Host "[FAILURE] Could not delete the hardware key." -ForegroundColor Red
+            Write-Error $_.Exception.Message
+        }
+    }
+}
+
+function Protect-DataWithTpmKey {
+    param (
+        [string]$KeyName = $script:KeyName,
+        [string]$StringToSign = "TPM INFO TOOL"
+    )
+
+    if (-not [System.Security.Cryptography.CngKey]::Exists($KeyName, $script:CngProvider)) {
+        try {
+            $CngKeyCreationParameters = New-Object System.Security.Cryptography.CngKeyCreationParameters
+            $CngKeyCreationParameters.Provider = $script:CngProvider
+            $CngKeyCreationParameters.KeyCreationOptions = [System.Security.Cryptography.CngKeyCreationOptions]::None
+            $Algorithm = [System.Security.Cryptography.CngAlgorithm]::Rsa
+
+            $Null = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyName, $CngKeyCreationParameters)
+        } catch {
+            Write-Host "[FAILURE] Failed to provision the TPM key." -ForegroundColor Red
+            Write-Error $_.Exception.Message
+            return $null
+        }
+    }
+
+    try {
+        $TpmKey = [System.Security.Cryptography.CngKey]::Open($KeyName, $script:CngProvider)
+        $ChallengeBytes = [System.Text.Encoding]::UTF8.GetBytes($StringToSign)
+
+        $RsaSigner = New-Object System.Security.Cryptography.RSACng($TpmKey)
+        $Padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+        $HashAlgorithm = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+
+        $SignatureBytes = $RsaSigner.SignData($ChallengeBytes, $HashAlgorithm, $Padding)
+        $SignatureBase64 = [Convert]::ToBase64String($SignatureBytes)
+
+        $PublicKeyBytes = $TpmKey.Export([System.Security.Cryptography.CngKeyBlobFormat]::GenericPublicBlob)
+        $PublicKeyBase64 = [Convert]::ToBase64String($PublicKeyBytes)
+
+        return [PSCustomObject]@{
+            OriginalString  = $StringToSign
+            PublicKeyBase64 = $PublicKeyBase64
+            SignatureBase64 = $SignatureBase64
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Test-MyTpmProof {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$OriginalString,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PublicKeyBase64,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SignatureBase64
+    )
+
+    try {
+        $CleanPublicKey = $PublicKeyBase64 -replace '\s+'
+        $CleanSignature = $SignatureBase64 -replace '\s+'
+
+        $PublicKeyBytes = [Convert]::FromBase64String($CleanPublicKey)
+        $SignatureBytes = [Convert]::FromBase64String($CleanSignature)
+        $DataBytes = [System.Text.Encoding]::UTF8.GetBytes($OriginalString)
+
+        $CngKeyBlobFormat = [System.Security.Cryptography.CngKeyBlobFormat]::GenericPublicBlob
+        $CngKey = [System.Security.Cryptography.CngKey]::Import($PublicKeyBytes, $CngKeyBlobFormat)
+        $Rsa = New-Object System.Security.Cryptography.RSACng($CngKey)
+
+        $Padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+        $HashAlgorithm = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+
+        $IsValid = $Rsa.VerifyData($DataBytes, $SignatureBytes, $HashAlgorithm, $Padding)
+        return $IsValid;
+    } catch {
+        return $false
+    }
+}
+
+function Test-LocalAttestation {
+    try {
+        Remove-TpmKey -KeyName $KeyName -ErrorAction SilentlyContinue
+
+        $CryptoPayload = Protect-DataWithTpmKey -StringToSign "TPM_INFO_TOOL_KEY"
+
+        if ($null -ne $CryptoPayload) {
+            return Test-MyTpmProof -OriginalString $CryptoPayload.OriginalString `
+                                   -PublicKeyBase64 $CryptoPayload.PublicKeyBase64 `
+                                   -SignatureBase64 $CryptoPayload.SignatureBase64
+        } else {
+            return $false
+        }
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Remove-TpmKey -KeyName $KeyName -ErrorAction SilentlyContinue
     }
 }
 
@@ -1848,6 +1968,12 @@ function Show-UIOutput ($Data) {
 		Log-Output "UAC $($systemData.UACLevel)" Yellow
 	}
 
+	if ($Data.TestLocalAttestation) {
+		Log-Output "[PASS] Local Attestation Test" Green
+	} else {
+		Log-Output "[FAIL] Local Attestation Test" Red
+	}
+
 	if ($systemData.Sha256 -eq $false) {
 		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
 	}
@@ -2017,6 +2143,7 @@ function Invoke-MainExecution {
 		TpmInfo               = $(Step-Progress; Get-TpmStatus)
 		TpmOwnership          = $(Step-Progress; Get-TpmOwnershipState)
 		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
+		TestLocalAttestation  = $(Step-Progress; Test-LocalAttestation)
 		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
 		Randgrid              = $(Step-Progress; Get-randgridRegistryAndDriverInfo)
 		BrokerExe             = $(Step-Progress; Get-CODBrokerInfo)
