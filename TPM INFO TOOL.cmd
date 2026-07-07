@@ -263,12 +263,10 @@ function Get-MicrosoftCaStatus {
         $has2023Key = $blob -like "*Windows UEFI CA 2023*" -or $blob -like "*Microsoft Corporation UEFI CA 2023*"
 
         return [PSCustomObject]@{
-            Uefi2023Text = if ($has2023Key) { "INSTALLED" } else { "NOT FOUND (Using old 2011 Keys)" }
             Passed       = $has2023Key
         }
     } catch {
         return [PSCustomObject]@{
-            Uefi2023Text = "Unreadable / Secure Boot Off"
             Passed       = $false
         }
     }
@@ -1985,6 +1983,12 @@ function Show-UIOutput ($Data) {
 		Log-Output "[PASS] Local Attestation Test" Green
 	} else {
 		Log-Output "[FAIL] Local Attestation Test" Red
+	}
+
+	if ($Data.MicrosoftCa.Passed) {
+		Log-Output "[PASS] CA 2023" Green
+	} else {
+		Log-Output "[INFO] No CA 2023"
 	}
 
 	if ($systemData.Sha256 -eq $false) {
