@@ -57,7 +57,7 @@ $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ProgressStep = 0
-$global:TotalSteps   = 54
+$global:TotalSteps   = 55
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1123,6 +1123,12 @@ function Check-CodBrokerService {
     }
 }
 
+function Test-SocialMedia_UEFICA2023 {
+    [bool](Get-ChildItem -Path Cert:\LocalMachine\*, Cert:\CurrentUser\* -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.Subject -like "*Windows UEFI CA 2023*" } |
+        Select-Object -First 1)
+}
+
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -2027,6 +2033,10 @@ function Show-UIOutput ($Data) {
 		Log-Output "RESULT: Pluton detected" 'DarkYellow'
 	}
 
+	if ($Data.SocialMedia_UEFICA2023){
+		Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
+	}
+
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
     Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
     Log-Output "Key Exchange Key (KEK):    $($Data.SbKeys.KEK)"
@@ -2146,6 +2156,7 @@ function Invoke-MainExecution {
 		SecureBootType        = $(Step-Progress; Get-SecureBootSetupType)
 		SbKeys                = $(Step-Progress; Get-SecureBootKeysType)
 		MicrosoftCa           = $(Step-Progress; Get-MicrosoftCaStatus)
+		SocialMedia_UEFICA2023= $(Step-Progress; Test-SocialMedia_UEFICA2023)
 		CsmInfo               = $(Step-Progress; Get-CsmStatus)
 		TpmInfo               = $(Step-Progress; Get-TpmStatus)
 		TpmOwnership          = $(Step-Progress; Get-TpmOwnershipState)
