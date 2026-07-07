@@ -1801,7 +1801,7 @@ function Show-UserRecommendedSteps ($Data) {
         Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
 		Log-Output "   WHEN: If you have problems."
-        Log-Output "   HOW TO FIX: Temporarily disable the antivirus or whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
+        Log-Output "   HOW TO FIX: Whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
         $hasIssues = $true
     }
 
