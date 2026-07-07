@@ -1651,12 +1651,14 @@ function Get-CertreqAttestation($Data) {
         $enrollSuccess = $false
     }
 
+	$nameResolutionFailure = $certRaw -match "The server name or address could not be resolved"
 	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
 
     return [PSCustomObject]@{
         CertRaw       = $certRaw
         IsOverallPass = $isOverallPass
 		EnrollSuccess = $enrollSuccess
+		NameResolutionFailure = $nameResolutionFailure
     }
 }
 
@@ -1819,6 +1821,11 @@ function Show-UserRecommendedSteps ($Data) {
 			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
 		}
     }
+
+	if ($Data.NameResolutionFailure) {
+		Log-Output "Cannot connect to the cloud attestation server. Firewall or ISP may be blocking certreq" 'Red'
+		Log-Output "->Check you have internet" 'Red'
+	}
 
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
@@ -2183,6 +2190,7 @@ function Invoke-MainExecution {
 	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.certRaw
 	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.isOverallPass
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
+	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.nameResolutionFailure
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
 	$systemData | Add-Member -NotePropertyName "ComparedKeyId" -NotePropertyValue $ComparedKeyId
 
