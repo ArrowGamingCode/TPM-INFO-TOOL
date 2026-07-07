@@ -1076,7 +1076,7 @@ function Invoke-CodBrokerCycle {
             }
         }
 
-        Stop-Service -Name $serviceName -Force -ErrorAction Stop
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop -WarningAction SilentlyContinue
         if (-not (Watch-ServiceStatus -Service $service -TargetStatus 'Stopped')) {
             return "False (Timeout / Hung on Stop)"
         }
