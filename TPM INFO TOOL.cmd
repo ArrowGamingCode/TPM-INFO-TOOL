@@ -1652,7 +1652,7 @@ function Get-CertreqAttestation($Data) {
     if ($TestFile -and (Test-Path $TestFile)) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
-        $certRaw = certreq -enrollaik -f -config '""' 2>&1 | Out-String
+        $certRaw = certreq -q -enrollaik -f -config '""' 2>&1 | Out-String
     }
 	Write-Progress -Activity "Loading System Diagnostics" -Completed
 
