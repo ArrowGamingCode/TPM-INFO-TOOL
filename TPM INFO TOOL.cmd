@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.5"
+set "TPM_TOOL_VERSION=1.0.6"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -625,8 +625,9 @@ function Protect-AIKPrivacy {
         $datePattern = "(?m)^Date:.*\r?\n?"
         $aesPattern = "AES128"
         $shaPattern = "SHA256"
-		$versionPattern = "v2\.0"
-		$systemUserPattern = "Local System User context"
+        $versionPattern = "v2\.0"
+        $systemUserPattern = "Local System User context"
+        $blankLinesPattern = "(?m)^\s*\r?\n"
 
         $cleanOutput = $InputString `
             -replace $certPattern, "..REMOVED.." `
@@ -641,8 +642,9 @@ function Protect-AIKPrivacy {
             -replace $datePattern, "" `
             -replace $aesPattern, "[REMOVED]" `
             -replace $shaPattern, "[REMOVED]" `
-			-replace $versionPattern, "" `
-			-replace $systemUserPattern, ""
+            -replace $versionPattern, "" `
+            -replace $systemUserPattern, "" `
+            -replace $blankLinesPattern, ""
 
         return $cleanOutput
     }
@@ -2251,7 +2253,6 @@ function Show-UIOutput ($Data) {
     Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
     Log-Output "Key Exchange Key (KEK):    $($Data.SbKeys.KEK)"
     Log-Output "Authorized DB Key:         $($Data.SbKeys.DB)"
-    Log-Output ""
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
