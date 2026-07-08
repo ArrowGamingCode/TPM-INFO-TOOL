@@ -31,8 +31,6 @@ call :CollapseCommandOutput TpmToolType "tpmtool /?"
 echo Stage 1 done.
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0' -Raw) -join [Environment]::NewLine)"
-echo -------------------------------------------------------------------------
-pause
 exit /b
 
 :CollapseCommandOutput
@@ -56,6 +54,7 @@ goto :eof
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
+$global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
 $global:TotalSteps   = 55
 $ScriptVersion = $env:TPM_TOOL_VERSION
@@ -1155,13 +1154,19 @@ function Print-PCRTable {
 }
 
 function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
-     if ($NoNewLine) {
+    if ($NoNewLine) {
         Write-Host $Text -ForegroundColor $Color -NoNewline
         $global:ClipboardBuffer += $Text
     } else {
         Write-Host $Text -ForegroundColor $Color
         $global:ClipboardBuffer += "$Text`r`n"
-     }
+    }
+
+    $global:ImageBuffer.Add([PSCustomObject]@{
+        Text      = $Text
+        Color     = $Color
+        NoNewLine = $NoNewLine
+    })
 }
 
 function Show-PCR_Message() {
@@ -1749,6 +1754,207 @@ function Get-IsMSI {
 }
 
 # =========================================================================
+# GUI FORM
+# =========================================================================
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+function Show-TpmGuiFormMessage {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [bool]$AttestationPass
+    )
+
+    $ColorMap = @{
+        "Cyan"       = [System.Drawing.Color]::Cyan
+        "DarkRed"    = [System.Drawing.Color]::Crimson
+        "DarkYellow" = [System.Drawing.Color]::Gold
+        "Blue"       = [System.Drawing.Color]::DeepSkyBlue
+        "Green"      = [System.Drawing.Color]::Lime
+        "Red"        = [System.Drawing.Color]::OrangeRed
+        "Yellow"     = [System.Drawing.Color]::Yellow
+        "White"      = [System.Drawing.Color]::White
+    }
+
+    if ($AttestationPass) {
+        $statusText  = "Pass"
+        $statusColor = [System.Drawing.Color]::Green
+    } else {
+        $statusText  = "Fail"
+        $statusColor = [System.Drawing.Color]::Red
+    }
+
+    $form = New-Object System.Windows.Forms.Form -Property @{
+        Text            = "TPM INFO TOOL"
+        Size            = New-Object System.Drawing.Size(570, 230)
+        StartPosition   = "CenterScreen"
+        FormBorderStyle = "FixedSingle"
+        MaximizeBox     = $false
+        BackColor       = [System.Drawing.Color]::White
+        TopMost         = $true
+    }
+
+    $lblTitle = New-Object System.Windows.Forms.Label -Property @{
+        Location = New-Object System.Drawing.Point(30, 30)
+        Size     = New-Object System.Drawing.Size(220, 30)
+        Text     = "OVERALL: TPM Attestation"
+        Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    }
+    $form.Controls.Add($lblTitle)
+
+    $lblStatus = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(255, 30)
+        Size      = New-Object System.Drawing.Size(100, 30)
+        Text      = $statusText
+        Font      = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+        ForeColor = $statusColor
+    }
+    $form.Controls.Add($lblStatus)
+
+    $lblNotice = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(30, 75)
+        Size      = New-Object System.Drawing.Size(490, 45)
+        Text      = "All information has been copied to your clipboard ready to paste into a forum!"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Italic)
+        ForeColor = [System.Drawing.Color]::DarkSlateGray
+    }
+    $form.Controls.Add($lblNotice)
+
+    $btnClose = New-Object System.Windows.Forms.Button -Property @{
+        Location = New-Object System.Drawing.Point(30, 135)
+        Size     = New-Object System.Drawing.Size(150, 35)
+        Text     = "Close"
+        Font     = New-Object System.Drawing.Font("Segoe UI", 10)
+        TabIndex = 0
+    }
+    $btnClose.Add_Click({ $form.Close() })
+    $form.Controls.Add($btnClose)
+
+    $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
+        Location = New-Object System.Drawing.Point(200, 135)
+        Size     = New-Object System.Drawing.Size(160, 35)
+        Text     = "Save Results to Image"
+        Font     = New-Object System.Drawing.Font("Segoe UI", 10)
+    }
+
+    $btnSaveImg.Add_Click({
+        $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
+            Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
+            Title    = "Save Tool Text Report"
+            FileName = "TPM_Attestation_Report.png"
+        }
+
+        if ($saveDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $textFont    = New-Object System.Drawing.Font("Courier New", 12)
+            $bitmapWidth = 1100
+            $padding     = 20
+
+            $testBitmap   = New-Object System.Drawing.Bitmap(1, 1)
+            $testGraphics = [System.Drawing.Graphics]::FromImage($testBitmap)
+
+            $currentX = $padding
+            $currentY = $padding
+            $lineHeight = [Math]::Ceiling($testGraphics.MeasureString("X", $textFont).Height)
+
+            foreach ($item in $global:ImageBuffer) {
+                $lines = $item.Text -split "`r`n" -split "`n"
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    $lineText = $lines[$i]
+                    $textSize = $testGraphics.MeasureString($lineText, $textFont)
+
+                    if ($i -gt 0) {
+                        $currentX = $padding
+                        $currentY += $lineHeight
+                    }
+
+                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                        $currentX += $textSize.Width
+                    } else {
+                        $currentX = $padding
+                        $currentY += $lineHeight
+                    }
+                }
+            }
+            $bitmapHeight = $currentY + $padding
+
+            $testGraphics.Dispose()
+            $testBitmap.Dispose()
+
+            $bitmap   = New-Object System.Drawing.Bitmap($bitmapWidth, $bitmapHeight)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+
+            $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+            $graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $graphics.Clear([System.Drawing.Color]::Black)
+
+            $currentX = $padding
+            $currentY = $padding
+
+            foreach ($item in $global:ImageBuffer) {
+                $drawingColor = $ColorMap[$item.Color]
+                if ($null -eq $drawingColor) { $drawingColor = [System.Drawing.Color]::White }
+                $brush = New-Object System.Drawing.SolidBrush($drawingColor)
+
+                $lines = $item.Text -split "`r`n" -split "`n"
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    $lineText = $lines[$i]
+
+                    if ($i -gt 0) {
+                        $currentX = $padding
+                        $currentY += $lineHeight
+                    }
+
+                    $graphics.DrawString($lineText, $textFont, $brush, $currentX, $currentY)
+                    $textSize = $graphics.MeasureString($lineText, $textFont)
+
+                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                        $currentX += ($textSize.Width - ($textFont.Size * 0.4))
+                    } else {
+                        $currentX = $padding
+                        $currentY += $lineHeight
+                    }
+                }
+                $brush.Dispose()
+            }
+
+            $graphics.Flush()
+
+            $extension = [System.IO.Path]::GetExtension($saveDialog.FileName).ToLower()
+            $imageFormat = [System.Drawing.Imaging.ImageFormat]::Png
+            if ($extension -eq ".jpg" -or $extension -eq ".jpeg") {
+                $imageFormat = [System.Drawing.Imaging.ImageFormat]::Jpeg
+            }
+
+            $bitmap.Save($saveDialog.FileName, $imageFormat)
+
+            $textFont.Dispose()
+            $graphics.Dispose()
+            $bitmap.Dispose()
+
+            $btnSaveImg.Visible = $false
+        }
+        $saveDialog.Dispose()
+    })
+    $form.Controls.Add($btnSaveImg)
+
+    $btnCloseClear = New-Object System.Windows.Forms.Button -Property @{
+        Location = New-Object System.Drawing.Point(380, 135)
+        Size     = New-Object System.Drawing.Size(160, 35)
+        Text     = "Close and Clear Clipboard"
+        Font     = New-Object System.Drawing.Font("Segoe UI", 9.5)
+    }
+    $btnCloseClear.Add_Click({
+        [System.Windows.Forms.Clipboard]::Clear()
+        $form.Close()
+    })
+    $form.Controls.Add($btnCloseClear)
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}
+
+# =========================================================================
 # USER RECOMMENDATION PIPELINE
 # =========================================================================
 
@@ -2047,9 +2253,9 @@ function Show-UIOutput ($Data) {
     Log-Output "Authorized DB Key:         $($Data.SbKeys.DB)"
     Log-Output ""
 
+	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
-    Write-Host $certOut
-    $global:ClipboardBuffer += $certOut
+    Log-Output $certOut 'green'
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
 	Log-Output $Data.parsedTpmToolType
@@ -2216,3 +2422,4 @@ function Invoke-MainExecution {
 $Data = Invoke-MainExecution
 Show-UserRecommendedSteps -Data $Data
 Check-CodBrokerService -Data $Data
+Show-TpmGuiFormMessage -attestationPass $Data.isOverallPass
