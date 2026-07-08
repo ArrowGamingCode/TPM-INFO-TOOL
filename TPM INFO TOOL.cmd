@@ -1663,6 +1663,13 @@ function Get-CertreqAttestation($Data) {
     }
 
 	$nameResolutionFailure = $certRaw -match "The server name or address could not be resolved"
+	$failureType1 = $certRaw -match "1168 ERROR_NOT_FOUND"
+
+	$failureMessage = ""
+	if($failureType1){
+		$failureMessage = "[FAIL] CertReq - registry issue?"
+	}
+
 	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
 
     return [PSCustomObject]@{
@@ -1670,6 +1677,7 @@ function Get-CertreqAttestation($Data) {
         IsOverallPass = $isOverallPass
 		EnrollSuccess = $enrollSuccess
 		NameResolutionFailure = $nameResolutionFailure
+		FailureMessage = $failureMessage
     }
 }
 
@@ -2258,6 +2266,10 @@ function Show-UIOutput ($Data) {
     $certOut = $Data.certRaw | Protect-AIKPrivacy
     Log-Output $certOut 'green'
 
+	if ($data.failureMessage) {
+		Log-Output $data.failureMessage 'red'
+	}
+
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
 	Log-Output $Data.parsedTpmToolType
 	$exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
@@ -2413,6 +2425,8 @@ function Invoke-MainExecution {
 	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.isOverallPass
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
 	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.nameResolutionFailure
+	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
+
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
 	$systemData | Add-Member -NotePropertyName "ComparedKeyId" -NotePropertyValue $ComparedKeyId
 
