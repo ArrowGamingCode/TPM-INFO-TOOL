@@ -1171,14 +1171,11 @@ function Show-FixMenu {
         Write-Host "=============================================" -ForegroundColor Cyan
     }
 
-    Write-Host "Please only run this if you have been asked to:"        -ForegroundColor White
-
-    Write-Host "1) Reset Windows TPM Cache"  -ForegroundColor White
-    Write-Host "Q) Quit"                                     -ForegroundColor Red
-
-    Write-Host "=============================================" -ForegroundColor Cyan
-
-
+    Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
+    Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
+    Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
+    Write-Host "Q) Quit"                                          -ForegroundColor Red
+    Write-Host "============================================="    -ForegroundColor Cyan
 
     $choice = Read-Host "Select an option"
 
@@ -1187,7 +1184,9 @@ function Show-FixMenu {
             Reset-WindowsCache
             Show-FixMenu -Message "TPM Cache Reset completed successfully."
         }
-
+        "2" {
+            Set-SecureBoot2023Certificates
+        }
         "Q" {
 			cls
             exit
@@ -1212,18 +1211,63 @@ function Reset-WindowsCache{
 	Write-Host "Actioned" -ForegroundColor Green
 }
 
-function Remove-Key {
+function Set-SecureBoot2023Certificates {
     try {
-        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1 | Out-String
-        if ($keys -match "ActivisionAIK") {
-            return "Found"
-        } else {
-            return "Not Found"
+        $uefiDb = [System.Text.Encoding]::ASCII.GetString((Get-SecureBootUEFI -Name db).Bytes)
+        if ($uefiDb -match 'Windows UEFI CA 2023') {
+            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY installed. No action required."
+            return
         }
     } catch {
-        return "Error checking Key CSP Container"
+        $status = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing" -ErrorAction SilentlyContinue
+        if ($status.UEFICA2023Status -eq "Updated") {
+            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY marked as Updated. No action required."
+            return
+        }
     }
-	Write-Host "Actioned" -ForegroundColor Green
+
+    Write-Host "WARNING: In rare cases, this may trigger a Secure Boot Violation." -ForegroundColor Yellow
+    Write-Host "Do you wish to continue? (Y/N)" -ForegroundColor Yellow
+
+    $choice = Read-Host "Enter choice"
+
+    if($choice.ToUpper() -eq "Y") {
+
+    }else{
+        Write-Host "Cancelled" -ForegroundColor Yellow
+        return
+    }
+
+    $os = Get-CimInstance Win32_OperatingSystem
+
+    if ($os.Caption -match "Windows 10") {
+        $ubr = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").UBR
+        if ($ubr -lt 4169) {
+            $kbCheck = Get-HotFix -Id "KB5036210" -ErrorAction SilentlyContinue
+            if (-not $kbCheck) {
+                Write-Error "Windows 10 is missing mandatory Secure Boot servicing files. Please run Windows Update first."
+                return
+            }
+        }
+    }
+
+    $blStatus = Get-BitLockerVolume -ErrorAction SilentlyContinue
+    if ($blStatus | Where-Object { $_.VolumeStatus -eq 'Encrypted' -or $_.ProtectionStatus -eq 'On' }) {
+        Write-Warning "Cancelled as BitLocker is ENABLED"
+        return
+    }
+
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot"
+    $bitmask = 0x5944
+
+    try {
+        Set-ItemProperty -Path $regPath -Name "AvailableUpdates" -Value $bitmask -Force -ErrorAction Stop
+        Start-ScheduledTask -TaskPath "\Microsoft\Windows\PI\" -TaskName "Secure-Boot-Update" -ErrorAction Stop
+        Write-Host "Success. Reboot your PC twice consecutively." -ForegroundColor Green
+    } catch {
+        Write-Error "Execution failed to push keys to staging: $_"
+    }
+	pause
 }
 
 
