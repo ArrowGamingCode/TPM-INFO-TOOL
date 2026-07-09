@@ -261,12 +261,37 @@ function Get-MicrosoftCaStatus {
         $blob = [System.Text.Encoding]::ASCII.GetString($db.Bytes)
         $has2023Key = $blob -like "*Windows UEFI CA 2023*" -or $blob -like "*Microsoft Corporation UEFI CA 2023*"
 
+        $baseData      = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot" -ErrorAction SilentlyContinue
+        $servicingData = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing" -ErrorAction SilentlyContinue
+
+        $availableUpdates = if ($baseData.PSObject.Properties['AvailableUpdates']) { $baseData.AvailableUpdates } else { 0 }
+        $servicingStatus  = if ($servicingData.PSObject.Properties['UEFICA2023Status']) { $servicingData.UEFICA2023Status } else { "Missing" }
+
+        if ($has2023Key) {
+            $overallState = "Success"
+        }
+        elseif ($availableUpdates -eq 0x5944 -and ($servicingStatus -eq "NotStarted" -or $servicingStatus -eq "InProgress")) {
+            $overallState = "Stuck"
+        }
+        elseif ($servicingStatus -eq "PendingReboot") {
+            $overallState = "Pending Reboot"
+        }
+        elseif ($availableUpdates -eq 0 -and $servicingStatus -eq "Missing") {
+            $overallState = "Not Required / Not Started"
+        }
+        else {
+            $overallState = "Transient"
+        }
+
         return [PSCustomObject]@{
             Passed       = $has2023Key
+            OverallState = $overallState
         }
+
     } catch {
         return [PSCustomObject]@{
             Passed       = $false
+            OverallState = "Unsupported"
         }
     }
 }
@@ -2284,9 +2309,9 @@ function Show-UIOutput ($Data) {
 	}
 
 	if ($Data.MicrosoftCa.Passed) {
-		Log-Output "[PASS] CA 2023" Green
+		Log-Output "[PASS] CA 2023: $($systemData.MicrosoftCA.OverallState)" Green
 	} else {
-		Log-Output "[INFO] No CA 2023"
+		Log-Output "[INFO] No CA 2023: $($systemData.MicrosoftCA.OverallState)"
 	}
 
 	if ($systemData.Sha256 -eq $false) {
