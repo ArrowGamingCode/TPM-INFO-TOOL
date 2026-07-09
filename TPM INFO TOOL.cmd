@@ -1129,6 +1129,79 @@ function Test-SocialMedia_UEFICA2023 {
 }
 
 # =========================================================================
+# FIX Menu
+# =========================================================================
+
+function Show-FixMenu {
+    param (
+        [string]$Message = ""
+    )
+
+    Clear-Host
+    Write-Host "             TPM INFO TOOL - FIX MENU         " -ForegroundColor Cyan -BackgroundColor DarkCyan
+    Write-Host "=============================================" -ForegroundColor Cyan
+
+    if (-not [string]::IsNullOrEmpty($Message)) {
+        Write-Host "NOTE: $Message" -ForegroundColor Yellow
+        Write-Host "=============================================" -ForegroundColor Cyan
+    }
+
+    Write-Host "Please only run this if you have been asked to:"        -ForegroundColor White
+
+    Write-Host "1) Reset Windows TPM Cache"  -ForegroundColor White
+    Write-Host "Q) Quit"                                     -ForegroundColor Red
+
+    Write-Host "=============================================" -ForegroundColor Cyan
+
+
+
+    $choice = Read-Host "Select an option"
+
+    switch ($choice) {
+        "1" {
+            Reset-WindowsCache
+            Show-FixMenu -Message "TPM Cache Reset completed successfully."
+        }
+
+        "Q" {
+            exit
+        }
+
+        default {
+            Show-FixMenu -Message "Invalid selection. Please try again."
+        }
+    }
+}
+
+function Reset-WindowsCache{
+	$Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
+	$Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
+	if (Test-Path $Path1) {
+		Remove-Item -Path $Path1 -Recurse -Force
+	}
+	if (Test-Path $Path2) {
+		Remove-Item -Path $Path2 -Recurse -Force
+	}
+	Start-TPM-Maintenance
+	Write-Host "Actioned" -ForegroundColor Green
+}
+
+function Remove-Key {
+    try {
+        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1 | Out-String
+        if ($keys -match "ActivisionAIK") {
+            return "Found"
+        } else {
+            return "Not Found"
+        }
+    } catch {
+        return "Error checking Key CSP Container"
+    }
+	Write-Host "Actioned" -ForegroundColor Green
+}
+
+
+# =========================================================================
 # PRINT PIPELINE
 # =========================================================================
 
@@ -2434,7 +2507,11 @@ function Invoke-MainExecution {
 	return $systemData
 }
 
-$Data = Invoke-MainExecution
-Show-UserRecommendedSteps -Data $Data
-Check-CodBrokerService -Data $Data
-Show-TpmGuiFormMessage -attestationPass $Data.isOverallPass
+if ($TestFile -eq "-fix") {
+	Show-FixMenu
+}else{
+	$Data = Invoke-MainExecution
+	Show-UserRecommendedSteps -Data $Data
+	Check-CodBrokerService -Data $Data
+	Show-TpmGuiFormMessage -attestationPass $Data.isOverallPass
+}
