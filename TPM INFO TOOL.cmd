@@ -1164,6 +1164,7 @@ function Show-FixMenu {
         }
 
         "Q" {
+			cls
             exit
         }
 
@@ -2118,7 +2119,15 @@ function Show-UserRecommendedSteps ($Data) {
 	if ($Data.NameResolutionFailure) {
 		Log-Output "Cannot connect to the cloud attestation server. Firewall or ISP may be blocking certreq" 'Red'
 		Log-Output "->Check you have internet" 'Red'
+		$hasIssues = $true
 	}
+
+	if (!$Data.MicrosoftCa.Passed) {
+		Log-Output "-> [WARNING] Windows UEFI CA 2023 not fond"  'Yellow'
+		Log-Output "   COD MAY need this updated. However, irrespective of COD, its best practice to have this."
+		$hasIssues = $true
+	}
+
 
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
