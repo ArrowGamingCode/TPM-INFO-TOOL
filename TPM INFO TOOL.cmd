@@ -273,7 +273,7 @@ function Get-SecureBootKeysType {
     }
 }
 
-function Get-OverallPassStatus () {
+function Get-OverallPassStatus {
 	param($enrollSuccess, $Data)
 	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
 							#(unsure if all system work with this -and $Data.LocalAttest
@@ -2616,7 +2616,7 @@ function Invoke-MainExecution {
 		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
 		TestLocalAttestation  = $(Step-Progress; Test-LocalAttestation)
 		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
-		Randgrid              = $(Step-Progress; Get-randgridRegistryAndDriverInfo)
+		Randgrid              = $(Step-Progress; Get-RandgridRegistryAndDriverInfo)
 		BrokerExe             = $(Step-Progress; Get-CODBrokerInfo)
 		BatteryInfo           = $(Step-Progress; Get-BatteryStatus)
 		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
@@ -2648,13 +2648,13 @@ function Invoke-MainExecution {
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
-	$Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw) -or (Is-Pluton)
-	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.certRaw -tpmKeyId $systemData.LiveTpmKeyId
+	$Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.CertRaw) -or (Is-Pluton)
+	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.CertRaw -tpmKeyId $systemData.LiveTpmKeyId
 
-	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.certRaw
-	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.isOverallPass
+	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
+	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.IsOverallPass
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
-	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.nameResolutionFailure
+	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
 	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
 
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
