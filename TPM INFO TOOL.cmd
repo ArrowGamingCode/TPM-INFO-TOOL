@@ -77,7 +77,7 @@ function Step-Progress {
 
 function Get-CpuCompliance {
     try {
-        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
         $isPassed = $true
 		$isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
@@ -943,12 +943,28 @@ function Get-BitLockerStatus {
         $blVolume = Get-BitLockerVolume -VolumeType OperatingSystem -ErrorAction Stop
         if ($blVolume -and $blVolume.ProtectionStatus -eq "On") {
             return [PSCustomObject]@{ Text = "Yes"; Passed = $true }
-        } else {
+        } elseif ($blVolume) {
             return [PSCustomObject]@{ Text = "No"; Passed = $false }
         }
-    } catch {
-        return [PSCustomObject]@{ Text = "No / Not Supported"; Passed = $false }
-    }
+    } catch {}
+
+    try {
+        $bitLockerStatus = Get-CimInstance -Namespace "Root\Microsoft\Windows\CIDatastore" -ClassName "CitBitLockerStatus" -ErrorAction SilentlyContinue
+        if ($bitLockerStatus -and $bitLockerStatus.BaseEncryptionStatus -eq 1) {
+            return [PSCustomObject]@{ Text = "Yes (Device Encryption)"; Passed = $true }
+        }
+    } catch {}
+
+    try {
+        $manageBde = manage-bde -status C: 2>$null
+        if ($manageBde -match "Protection Status:\s+Protection On") {
+            return [PSCustomObject]@{ Text = "Yes (Device Encryption)"; Passed = $true }
+        } elseif ($manageBde -match "Protection Status:\s+Protection Off") {
+            return [PSCustomObject]@{ Text = "No"; Passed = $false }
+        }
+    } catch {}
+
+    return [PSCustomObject]@{ Text = "No / Not Supported"; Passed = $false }
 }
 
 function Get-IntelMeVersion {
@@ -2247,7 +2263,7 @@ function Show-UserRecommendedSteps ($Data) {
 	}
 
 	if (!$Data.MicrosoftCa.Passed) {
-		Log-Output "-> [WARNING] Windows UEFI CA 2023 not fond"  'Yellow'
+		Log-Output "-> [WARNING] Windows UEFI CA 2023 not found"  'Yellow'
 		Log-Output "   COD MAY need this updated. However, irrespective of COD, its best practice to have this."
 		$hasIssues = $true
 	}
@@ -2470,7 +2486,7 @@ function Show-UIOutput ($Data) {
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
-    Log-Output $certOut 'green'
+    Log-Output $certOut 'Green'
 
 	if ($data.failureMessage) {
 		Log-Output $data.failureMessage 'red'
