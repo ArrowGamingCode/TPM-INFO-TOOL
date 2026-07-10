@@ -2344,7 +2344,7 @@ function Show-UIOutput ($Data) {
 	} else {
 		Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
 	}
-	Print-CodBrokerCycleStatus -CycleResult $systemData.CodBrokerCycleStatus
+	Print-CodBrokerCycleStatus -CycleResult $Data.CodBrokerCycleStatus
 
 	if ($Data.BrokerExe) {
 		Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$($Data.BrokerExe.Version)) [$($Data.BrokerExe.MD5ShortHex)] (Pass)" 'Green'
@@ -2374,10 +2374,10 @@ function Show-UIOutput ($Data) {
         }
     }
 
-	if ($systemData.UACLevel -eq "Default") {
-		Log-Output "[PASS] UAC $($systemData.UACLevel)" Green
+	if ($Data.UACLevel -eq "Default") {
+		Log-Output "[PASS] UAC $($Data.UACLevel)" Green
 	} else {
-		Log-Output "UAC $($systemData.UACLevel)" Yellow
+		Log-Output "UAC $($Data.UACLevel)" Yellow
 	}
 
 	if ($Data.TestLocalAttestation) {
@@ -2387,12 +2387,12 @@ function Show-UIOutput ($Data) {
 	}
 
 	if ($Data.MicrosoftCa.Passed) {
-		Log-Output "[PASS] CA 2023: $($systemData.MicrosoftCA.OverallState)" Green
+		Log-Output "[PASS] CA 2023: $($Data.MicrosoftCA.OverallState)" Green
 	} else {
-		Log-Output "[INFO] No CA 2023: $($systemData.MicrosoftCA.OverallState)"
+		Log-Output "[INFO] No CA 2023: $($Data.MicrosoftCA.OverallState)"
 	}
 
-	if ($systemData.Sha256 -eq $false) {
+	if ($Data.Sha256 -eq $false) {
 		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
 	}
 
