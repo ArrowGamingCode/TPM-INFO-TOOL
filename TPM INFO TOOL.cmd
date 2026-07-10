@@ -2283,9 +2283,20 @@ function Show-UserRecommendedSteps ($Data) {
 # UI RENDERING PIPELINE
 # =========================================================================
 
-function Show-Banner ($isOverallPass, [switch]$ConsoleOnly) {
-    $LogCmd = if ($ConsoleOnly) { { param($msg, $color) Write-Host $msg -ForegroundColor $color } }
-              else { { param($msg, $color) Log-Output $msg $color } }
+function Show-Banner {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [bool]$isOverallPass,
+
+        [switch]$ConsoleOnly
+    )
+
+	$LogCmd = if ($ConsoleOnly) {
+        { Write-Host $args[0] -ForegroundColor $args[1] }
+    } else {
+        { Log-Output -Message $args[0] -Color $args[1] }
+    }
 
     if ($isOverallPass) {
         $statusText = "PASS"
