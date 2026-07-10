@@ -56,7 +56,7 @@ $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
-$global:TotalSteps   = 55
+$global:TotalSteps   = 56
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1192,6 +1192,38 @@ function Test-SocialMedia_UEFICA2023 {
     [bool](Get-ChildItem -Path Cert:\LocalMachine\*, Cert:\CurrentUser\* -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.Subject -like "*Windows UEFI CA 2023*" } |
         Select-Object -First 1)
+}
+
+function Get-Event1040Details {
+    [CmdletBinding()]
+    param(
+        [string]$LogName = 'Application',
+        [int]$EventId = 1040
+    )
+
+    $startTime = (Get-Date).AddDays(-1)
+
+    $event = Get-WinEvent -FilterHashtable @{
+        LogName   = $LogName
+        Id        = $EventId
+        Level     = 2
+        StartTime = $startTime
+    } -MaxEvents 1 -ErrorAction SilentlyContinue
+
+    if (-not $event) {
+        return [PSCustomObject]@{
+            Found    = $false
+            Filename = $null
+        }
+    }
+
+    $xml = [xml]$event.ToXml()
+    $filename = $xml.Event.EventData.Data | Where-Object { $_ -match '\d{10}-\d{10}\.json' }
+
+    return [PSCustomObject]@{
+        Found    = $true
+        Filename = $filename
+    }
 }
 
 # =========================================================================
@@ -2445,6 +2477,12 @@ function Show-UIOutput ($Data) {
 		Log-Output "[INFO] No CA 2023: $($Data.MicrosoftCA.OverallState)"
 	}
 
+	if (!$Data.GetEvent1040Details.Found){
+		Log-Output "[PASS] Event 1040" 'Green'
+	}else{
+		Log-Output "[INFO] Event 1040 $($Data.GetEvent1040Details.Filename)"
+	}
+
 	if ($Data.Sha256 -eq $false) {
 		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
 	}
@@ -2625,6 +2663,7 @@ function Invoke-MainExecution {
 		TpmInfo               = $(Step-Progress; Get-TpmStatus)
 		TpmOwnership          = $(Step-Progress; Get-TpmOwnershipState)
 		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
+		GetEvent1040Details   = $(Step-Progress; Get-Event1040Details)
 		TestLocalAttestation  = $(Step-Progress; Test-LocalAttestation)
 		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
 		Randgrid              = $(Step-Progress; Get-RandgridRegistryAndDriverInfo)
