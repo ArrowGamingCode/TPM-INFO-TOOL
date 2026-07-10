@@ -1321,16 +1321,22 @@ function Reset-ActivisionKey {
 # =========================================================================
 
 function Show-PlatformStatus {
+    $foundPlatforms = @()
+
     if ($global:platforms.SteamFound) {
-        Log-Output "RESULT: Steam CoD Found"
-    } else {
-        Log-Output "RESULT: Steam CoD Not Detected"
+        $foundPlatforms += "Steam"
     }
 
     if ($global:platforms.BnetFound) {
-        Log-Output "RESULT: Battle.net CoD Found"
+        $foundPlatforms += "BNET"
+    }
+
+    if ($foundPlatforms.Count -gt 0) {
+        # Joins the array elements with '/' (e.g., "Steam/BNET")
+        $platformString = $foundPlatforms -join "/"
+        Log-Output "RESULT: COD $platformString Found"
     } else {
-        Log-Output "RESULT: Battle.net CoD Not Detected"
+        Log-Output "RESULT: Neither COD Steam/BNET detected"
     }
 }
 
