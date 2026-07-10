@@ -2502,18 +2502,21 @@ function Show-UIOutput ($Data) {
         Log-Output "RESULT: broker_service.log not found" 'White'
     }
 
-	if ($Data.CodBootstrapperStatus.Found) {
-        if ($Data.CodBootstrapperStatus.Passed) {
-            Log-Output "PASS: bootstrapper.log" 'Green'
-        } else {
-            Log-Output "INFO: bootstrapper.log"
-            foreach ($Line in $Data.CodBootstrapperStatus.BottomLines) {
-                Log-Output "  $Line" 'White'
-            }
-        }
-    } else {
-        Log-Output "RESULT: bootstrapper.log tracking skipped ($($Data.CodBootstrapperStatus.BottomLines[0]))" 'White'
-    }
+	foreach ($Status in $Data.CodBootstrapperStatus) {
+		if ($Status.Found) {
+			if ($Status.Passed) {
+				Log-Output "PASS: bootstrapper.log" 'Green'
+			} else {
+				Log-Output "INFO: bootstrapper.log"
+				foreach ($Line in $Status.BottomLines) {
+					Log-Output "  $Line" 'White'
+				}
+			}
+		} else {
+			$SkipReason = if ($Status.BottomLines) { $Status.BottomLines[0] } else { "Path not found" }
+			Log-Output "RESULT: bootstrapper.log skipped: ($SkipReason)" 'White'
+		}
+	}
 	Log-Output ""
 
 	#Print-PCRTable
