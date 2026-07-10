@@ -80,6 +80,7 @@ function Get-CpuCompliance {
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
         $isPassed = $true
+		$isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
 
         if ($cpuName -match 'AMD Ryzen' -and $cpuName -match '\b([12]\d{3})[A-Z]*\b') {
             $isPassed = $false
@@ -88,12 +89,16 @@ function Get-CpuCompliance {
         return [PSCustomObject]@{
             Name   = $cpu.Name
             Passed = $isPassed
+			Socket = $cpu.SocketDesignation
+			IsAMD  = $isAmd
         }
     }
     catch {
         return [PSCustomObject]@{
             Name   = "Unknown"
             Passed = $false
+			Socket = "Unknown"
+			IsAMD  = $false
         }
     }
 }
@@ -2140,7 +2145,11 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if (!$Data.BiosInfo.Passed) {
-        Log-Output "-> Check if there is a newer BIOS" 'Yellow'
+		if ($Data.CpuInfo.Socket -eq "AM4") {
+			Log-Output "ALL AM4 systems need a BIOS update after ~August 2025. Check if there is a newer BIOS" 'Yellow'
+		} else {
+			Log-Output "-> Check if there is a newer BIOS" 'Yellow'
+		}
         $hasIssues = $true
     }
 
