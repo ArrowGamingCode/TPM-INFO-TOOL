@@ -1843,7 +1843,7 @@ function Get-CertreqAttestation($Data) {
 		$failureMessage = "[FAIL] CertReq - registry issue?"
 	}
 
-	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -criticalHardwarePass $criticalHardwarePass -data $Data
+	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
 
     return [PSCustomObject]@{
         CertRaw       = $certRaw
