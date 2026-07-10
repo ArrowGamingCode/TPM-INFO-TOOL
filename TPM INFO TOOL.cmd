@@ -268,7 +268,8 @@ function Get-SecureBootKeysType {
     }
 }
 
-function Get-OverallPassStatus ($enrollSuccess, $Data) {
+function Get-OverallPassStatus () {
+	param($enrollSuccess, $Data)
 	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
 							#(unsure if all system work with this -and $Data.LocalAttest
     return ($enrollSuccess -and $criticalHardwarePass)
@@ -2224,7 +2225,7 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
 	if ($Data.Pluton -and -not $Data.isOverallPass) {
-        Log-Output "-> [WARNING] This PC uses a Pluton TPM (whitch often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
+        Log-Output "-> [WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
 		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
         $hasIssues = $true
 
