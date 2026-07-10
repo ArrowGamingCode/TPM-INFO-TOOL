@@ -192,29 +192,37 @@ function Get-SecureBootStatus {
 function Get-SecureBootSetupType {
     try {
         $smVar = Get-SecureBootUEFI -Name SetupMode -ErrorAction Stop
-        $byteValue = if ($smVar -and $smVar.PSObject.Properties['Bytes']) { $smVar.Bytes[0] } else { $smVar[0] }
+
+        $smArray = @($smVar)
+        $byteValue = $null
+
+        if ($smVar -and $smVar.PSObject.Properties['Bytes']) {
+            $byteValue = $smVar.Bytes[0]
+        } elseif ($smArray.Count -gt 0) {
+            $byteValue = $smArray[0]
+        }
 
         if ($null -ne $byteValue) {
-            if ($byteValue -eq 1) {
+            if (1 -eq $byteValue) {
                 return [PSCustomObject]@{
-                    Text   = "Type (Setup Mode)"
-                    Passed = $false
-                }
+					Text = "Type (Setup Mode)"
+					Passed = $false
+				}
             } else {
                 return [PSCustomObject]@{
-                    Text   = "Type (User Mode)"
-                    Passed = $true
-                }
+					Text = "Type (User Mode)"
+					Passed = $true
+				}
             }
         } else {
             return [PSCustomObject]@{
-                Text   = "Type (Unknown - No Data)"
-                Passed = $false
-            }
+				Text = "Type (Unknown - No Data)"
+				Passed = $false
+			}
         }
     } catch {
         return [PSCustomObject]@{
-            Text   = "Type (Unreadable - $_)"
+            Text   = "Type (Unreadable - $($_.Exception.Message))"
             Passed = $false
         }
     }
