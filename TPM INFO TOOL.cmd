@@ -2295,7 +2295,7 @@ function Show-Banner {
 	$LogCmd = if ($ConsoleOnly) {
         { Write-Host $args[0] -ForegroundColor $args[1] }
     } else {
-        { Log-Output -Message $args[0] -Color $args[1] }
+        { Log-Output -Text $args[0] -Color $args[1] }
     }
 
     if ($isOverallPass) {
@@ -2479,7 +2479,7 @@ function Show-UIOutput ($Data) {
     }
 
 	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days"
-	if ($Data.BitLocker.Passed) {
+	if ($Data.BitLocker -and $Data.BitLocker.Passed) {
         Log-Output "BitLocker Enabled: Yes" 'Red'
     } else {
         Log-Output "BitLocker Enabled: No"
