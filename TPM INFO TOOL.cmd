@@ -2603,7 +2603,7 @@ function Invoke-MainExecution {
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
-	$Pluton             = ${Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw} -or ${Is-Pluton}
+	$Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.certRaw) -or (Is-Pluton)
 	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.certRaw -tpmKeyId $systemData.LiveTpmKeyId
 
 	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.certRaw
