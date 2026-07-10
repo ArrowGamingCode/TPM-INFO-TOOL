@@ -130,15 +130,21 @@ function Get-RamDetails {
     $ram = Get-CimInstance -ClassName Win32_PhysicalMemory | Select-Object -First 1
 
     if ($ram) {
-        $type = switch ($ram.SMBIOSMemoryType) {
+        $type = switch ($ram.MemoryType) {
             20      {'DDR'}
             21      {'DDR2'}
             24      {'DDR3'}
             26      {'DDR4'}
-            34      {'DDR5'}
+            0  {
+                switch ($ram.SMBIOSMemoryType) {
+                    26      {'DDR4'}
+                    34      {'DDR5'}
+                    default {'Unknown'}
+                }
+            }
             default {'Unknown'}
         }
-        return '{1}' -f $ram.DeviceLocator, $type, $ram.Speed
+        return $type
     }
 }
 
