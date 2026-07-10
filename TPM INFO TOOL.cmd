@@ -1179,6 +1179,7 @@ function Show-FixMenu {
     Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
     Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
     Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
+	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
 
@@ -1191,6 +1192,9 @@ function Show-FixMenu {
         }
         "2" {
             Set-SecureBoot2023Certificates
+        }
+        "3" {
+            Reset-ActivisionKey
         }
         "Q" {
 			cls
@@ -1275,6 +1279,27 @@ function Set-SecureBoot2023Certificates {
 	pause
 }
 
+function Reset-ActivisionKey {
+    try {
+        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1
+        $index = [array]::FindIndex($keys, [Predicate[object]]{ $args[0] -match "ActivisionAIK" })
+
+        if ($index -ge 0 -and $index -lt ($keys.Count - 1)) {
+            $filePath = $keys[$index + 1].Trim()
+
+            if (Test-Path $filePath) {
+                Rename-Item -Path $filePath -NewName "$($filePath | Split-Path -Leaf).bak" -Force
+                Show-FixMenu -Message "Successfully renamed key file to: $filePath.bak"
+            } else {
+                Show-FixMenu "Key found in certutil, but physical file not found at: $filePath"
+            }
+        } else {
+            Show-FixMenu "ActivisionAIK key not found."
+        }
+    } catch {
+       Show-FixMenu "Error: $($_.Exception.Message)"
+    }
+}
 
 # =========================================================================
 # PRINT PIPELINE
