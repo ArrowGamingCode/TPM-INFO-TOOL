@@ -2228,7 +2228,7 @@ function Show-UserRecommendedSteps ($Data) {
 		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
         $hasIssues = $true
 
-		if ($Data.Test-MSI.IsMSI){
+		if ($Data.TestMSI.IsMSI){
 			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
 		}
     }
@@ -2613,7 +2613,7 @@ function Invoke-MainExecution {
 		UACLevel              = $(Step-Progress; Get-UacStatus)
 		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
 		Sha256                = $(Step-Progress; Test-TPMSha256Support)
-		Test-MSI              = $(Step-Progress; Test-MSI)
+		TestMSI              = $(Step-Progress; Test-MSI)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
