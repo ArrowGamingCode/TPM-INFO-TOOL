@@ -80,7 +80,24 @@ function Get-CpuCompliance {
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
         $isPassed = $true
-		$isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
+        $isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
+
+        $genValue = $null
+        if ($cpuName -match "Intel") {
+            if ($cpuName -match "Core\(TM\) Ultra (\d)") {
+                $genValue = "Gen: $($Matches[1])"
+            } elseif ($cpuName -match "i\d-(\d+)") {
+                $modelNum = $Matches[1]
+                if ($modelNum.Length -eq 4) { $genValue = "Gen: $($modelNum.Substring(0, 1))" }
+                elseif ($modelNum.Length -eq 5) { $genValue = "Gen: $($modelNum.Substring(0, 2))" }
+            }
+        } elseif ($cpuName -match "AMD.*Ryzen") {
+            if ($cpuName -match "\b(\d)\d{3}\b") {
+                $genValue = "Gen: $($Matches[1])"
+            } elseif ($cpuName -match "Ryzen AI (\d+)") {
+                $genValue = "Gen: $($Matches[1])"
+            }
+        }
 
         if ($cpuName -match 'AMD Ryzen' -and $cpuName -match '\b([12]\d{3})[A-Z]*\b') {
             $isPassed = $false
@@ -88,17 +105,19 @@ function Get-CpuCompliance {
 
         return [PSCustomObject]@{
             Name   = $cpu.Name
+            Gen    = $genValue
             Passed = $isPassed
-			Socket = $cpu.SocketDesignation
-			IsAMD  = $isAmd
+            Socket = $cpu.SocketDesignation
+            IsAMD  = $isAmd
         }
     }
     catch {
         return [PSCustomObject]@{
             Name   = "Unknown"
+            Gen    = ""
             Passed = $false
-			Socket = "Unknown"
-			IsAMD  = $false
+            Socket = "Unknown"
+            IsAMD  = $false
         }
     }
 }
@@ -2377,7 +2396,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM INFO TOOL - $ScriptVersion - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild)) - Supported: $($Data.OSSupported)"
-    Log-Output "CPU:          $($Data.CpuInfo.Name)"
+    Log-Output "CPU:          $($Data.CpuInfo.Name) $($Data.CpuInfo.Gen)"
 	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
 	Log-Output "PC Model:     $($Data.PcModel)"
     Log-Output "Motherboard:  $($Data.Mobo)"
