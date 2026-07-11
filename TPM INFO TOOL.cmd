@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.7"
+set "TPM_TOOL_VERSION=1.0.8"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -1942,11 +1942,31 @@ function Get-CertreqAttestation($Data) {
 		$failureMessage = "[FAIL] CertReq - registry issue?"
 	}
 
-	$isOverallPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
+	$IsOverallAIKPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
+
+	if ($IsOverallAIKPass) {
+		$OverallPassResult = 1;
+	}else{
+		$OverallPassResult = 0;
+	}
+
+	$ek = Get-TpmEndorsementKeyInfo
+
+	if (-not $ek.PublicKey) {
+		$OverallPassResult = 2;
+	}
+
+	if ($Data.Pluton){
+		$OverallPassResult = 2;
+	}
+
+	#$OverallPassResult = 2;
 
     return [PSCustomObject]@{
         CertRaw       = $certRaw
-        IsOverallPass = $isOverallPass
+        OverallPassResult = $OverallPassResult
+		IsOverallAIKPass = $IsOverallAIKPass;
+
 		EnrollSuccess = $enrollSuccess
 		NameResolutionFailure = $nameResolutionFailure
 		FailureMessage = $failureMessage
@@ -2045,7 +2065,7 @@ function Show-TpmGuiFormMessage {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
-        [bool]$AttestationPass
+        $AttestationPass
     )
 
     $ColorMap = @{
@@ -2059,13 +2079,17 @@ function Show-TpmGuiFormMessage {
         "White"      = [System.Drawing.Color]::White
     }
 
-    if ($AttestationPass) {
+    if ($AttestationPass -eq 1) {
         $statusText  = "Pass"
         $statusColor = [System.Drawing.Color]::Green
-    } else {
+    } elseif ($AttestationPass -eq 0) {
         $statusText  = "Fail"
         $statusColor = [System.Drawing.Color]::Red
+    } else {
+        $statusText  = "UNKNOWN"
+        $statusColor = [System.Drawing.Color]::Yellow
     }
+
 
     $form = New-Object System.Windows.Forms.Form -Property @{
         Text            = "TPM INFO TOOL"
@@ -2287,7 +2311,7 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
-	if ($Data.doesThirdPartySecurityExist.Passed -and $Data.isOverallPass) {
+	if ($Data.doesThirdPartySecurityExist.Passed -and $Data.OverallPassResult -eq 1) {
         Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
 		Log-Output "   WHEN: If you have problems."
@@ -2308,7 +2332,7 @@ function Show-UserRecommendedSteps ($Data) {
         $hasIssues = $true
     }
 
-	if ($Data.Pluton -and -not $Data.isOverallPass) {
+	if ($Data.Pluton -and -not $Data.OverallPassResult -eq 1) {
         Log-Output "-> [WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
 		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
         $hasIssues = $true
@@ -2344,7 +2368,7 @@ function Show-Banner {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
-        [bool]$isOverallPass,
+        $OverallPassResult,
 
         [switch]$ConsoleOnly
     )
@@ -2355,15 +2379,19 @@ function Show-Banner {
         { Log-Output -Text $args[0] -Color $args[1] }
     }
 
-    if ($isOverallPass) {
+    if ($OverallPassResult -eq 1) {
         $statusText = "PASS"
         $color      = "Green"
         $padding    = " " * 17
-    } else {
+    } elseif ($OverallPassResult -eq 0) {
         $statusText = "FAIL"
         $color      = "Red"
         $padding    = " " * 17
-    }
+    } else{
+        $statusText = "UNKNOWN"
+        $color      = "Yellow"
+        $padding    = " " * 17
+	}
 
     &$LogCmd "=========================================================================" 'Cyan'
     &$LogCmd "| $padding [ OVERALL: TPM Attestation $statusText ] $padding |" $color
@@ -2372,7 +2400,8 @@ function Show-Banner {
 }
 
 function PrintLargeOverallResult ($result) {
-	Write-Host "=========================================================================" -ForegroundColor Blue
+    Write-Host "=========================================================================" -ForegroundColor Blue
+
     if ($result -eq 'PASS') {
         $ascii = @'
   ____    _    ____ ____  
@@ -2382,7 +2411,8 @@ function PrintLargeOverallResult ($result) {
  |_| /_/   \_\____/|____/ 
 '@
         Write-Host $ascii -ForegroundColor Green
-    } else {
+
+    } elseif ($result -eq 'FAIL') {
         $ascii = @'
   _____ _   ___ _     
  |  ___/ \ |_ _| |    
@@ -2391,13 +2421,24 @@ function PrintLargeOverallResult ($result) {
  |_|/_/   \_\___|_____|
 '@
         Write-Host $ascii -ForegroundColor Red
-    }
+
+	} elseif ($result -eq 'UNKNOWN') {
+		$ascii = @'
+ _   _ _   _ _  ___   _  _____        _   _ 
+| | | | \ | | |/ / \ | |/ _ \ \      / / | \ | |
+| | | |  \| | ' /|  \| | | | \ \ /\ / /  |  \| |
+| |_| | |\  | . \| |\  | |_| |\ V  V /   | |\  |
+ \___/|_| \_|_|\_\_| \_|\___/  \_/\_/    |_| \_|
+'@
+
+		Write-Host $ascii -ForegroundColor Yellow
+	}
 }
 
 function Show-UIOutput ($Data) {
     Clear-Host
 
-    Show-Banner -isOverallPass $Data.isOverallPass -ConsoleOnly
+    Show-Banner -OverallPassResult $Data.OverallPassResult -ConsoleOnly
 
     Log-Output "TPM INFO TOOL - $ScriptVersion - PowerShell: $($Data.PowerShellVer)"
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
@@ -2567,8 +2608,17 @@ function Show-UIOutput ($Data) {
     $certOut = $Data.certRaw | Protect-AIKPrivacy
     Log-Output $certOut 'Green'
 
+	if ($Data.IsOverallAIKPass) {
+		Log-Output "[PASS] OverallAIKResult" 'Green'
+	}else{
+		Log-Output "[FAIL] OverallAIKResult" 'Yellow'
+	}
 	if ($data.failureMessage) {
-		Log-Output $data.failureMessage 'red'
+		if ($data.OverallPassResult -eq 1) {
+			Log-Output $data.failureMessage 'Red'
+		}else{
+			Log-Output $data.failureMessage 'Yellow'
+		}
 	}
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
@@ -2618,13 +2668,17 @@ function Show-UIOutput ($Data) {
 
 	Show-TcgAttestationAudit -Data $Data
 
-    Show-Banner -isOverallPass $Data.isOverallPass
+    Show-Banner -OverallPassResult $Data.OverallPassResult
 
 	if (-not ($Data.EnrollSuccess)) {
 		Log-Output "EnrollSuccess Fail." 'Red'
 	}
 
-    if (-not ($Data.isOverallPass)) {
+    if ($Data.OverallPassResult -eq 1) {
+		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
+    }
+
+    if ($Data.OverallPassResult -eq 0) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
 		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
 
@@ -2727,7 +2781,8 @@ function Invoke-MainExecution {
 	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.CertRaw -tpmKeyId $systemData.LiveTpmKeyId
 
 	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
-	$systemData | Add-Member -NotePropertyName "isOverallPass" -NotePropertyValue $CertreqAttestation.IsOverallPass
+	$systemData | Add-Member -NotePropertyName "OverallPassResult" -NotePropertyValue $CertreqAttestation.OverallPassResult
+	$systemData | Add-Member -NotePropertyName "IsOverallAIKPass" -NotePropertyValue $CertreqAttestation.IsOverallAIKPass
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
 	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
 	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
@@ -2745,5 +2800,5 @@ if ($TestFile -eq "-fix") {
 	$Data = Invoke-MainExecution
 	Show-UserRecommendedSteps -Data $Data
 	Check-CodBrokerService -Data $Data
-	Show-TpmGuiFormMessage -attestationPass $Data.isOverallPass
+	Show-TpmGuiFormMessage -attestationPass $Data.OverallPassResult
 }
