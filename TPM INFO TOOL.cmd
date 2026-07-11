@@ -1948,16 +1948,15 @@ function Get-CertreqAttestation($Data) {
 		$OverallPassResult = 1;
 	}else{
 		$OverallPassResult = 0;
-	}
 
-	$ek = Get-TpmEndorsementKeyInfo
+		$ek = Get-TpmEndorsementKeyInfo
+		if (-not $ek.PublicKey) {
+			$OverallPassResult = 2;
+		}
 
-	if (-not $ek.PublicKey) {
-		$OverallPassResult = 2;
-	}
-
-	if ($Data.Pluton){
-		$OverallPassResult = 2;
+		if ($Data.Pluton){
+			$OverallPassResult = 2;
+		}
 	}
 
 	#$OverallPassResult = 2;
