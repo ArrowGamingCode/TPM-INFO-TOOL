@@ -1066,27 +1066,33 @@ function Get-AmdDriverVersion {
 function Get-TpmEndorsementCertStatus {
     try {
         $TpmInfo = Get-TpmEndorsementKeyInfo -HashAlgorithm SHA256 -ErrorAction Stop
+        $CertIssuerList = [System.Collections.Generic.List[string]]::new()
+        $HasMfg = $null -ne $TpmInfo.ManufacturerCertificates -and $TpmInfo.ManufacturerCertificates.Count -gt 0
+        $HasAdd = $null -ne $TpmInfo.AdditionalCertificates -and $TpmInfo.AdditionalCertificates.Count -gt 0
 
-        if ($null -eq $TpmInfo.AdditionalCertificates -or $TpmInfo.AdditionalCertificates.Count -eq 0) {
-            return [PSCustomObject]@{
-                Text   = "No AdditionalCertificates found (Likely older fTPM/PTT setup with no silicon-fused factory certs)"
-                Passed = $false
+        if ($HasMfg) {
+            foreach ($Cert in $TpmInfo.ManufacturerCertificates) {
+                $CertIssuerList.Add("INFO:Manufacturer Cert: $($Cert.Issuer)")
             }
         } else {
-            $CertIssuerList = @()
-            foreach ($Cert in $TpmInfo.AdditionalCertificates) {
-                $CertIssuerList += "$($Cert.Issuer)"
-            }
-
-            return [PSCustomObject]@{
-                Text   = $CertIssuerList -join " | "
-                Passed = $true
-            }
+            $CertIssuerList.Add("INFO:Manufacturer Cert: 0")
         }
+
+        if ($HasAdd) {
+            foreach ($Cert in $TpmInfo.AdditionalCertificates) {
+                $CertIssuerList.Add("INFO: Additional Cert: $($Cert.Issuer)")
+            }
+        } else {
+            $CertIssuerList.Add("INFO:Additional Cert: 0")
+        }
+
+        return [PSCustomObject]@{
+            Text = $CertIssuerList -join "`n"
+        }
+
     } catch {
         return [PSCustomObject]@{
-            Text   = "Error or Access Denied Reading Endorsement Key Info"
-            Passed = $false
+            Text = "Error or Access Denied Reading Endorsement Key Info"
         }
     }
 }
@@ -2542,7 +2548,7 @@ function Show-UIOutput ($Data) {
         Log-Output "BitLocker Enabled: No"
     }
 
-    Log-Output "RESULT: TPM Endorsement: $($Data.TpmEndorsement.Text)"
+    Log-Output "$($Data.TpmEndorsement.Text)"
 
 	if ($Data.Pluton){
 		Log-Output "RESULT: Pluton detected" 'DarkYellow'
