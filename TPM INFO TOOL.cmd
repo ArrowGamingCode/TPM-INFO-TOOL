@@ -23,10 +23,13 @@ set "TPM_TEST_FILE=%~1"
 cls
 echo Please wait while system information is retrieved...
 
+for /f "tokens=4" %%G in ('chcp') do set "ORIGINAL_CP=%%G"
+chcp 437 >nul
 set "TpmDeviceData="
 set "TpmToolType="
 call :CollapseCommandOutput TpmDeviceData "tpmtool getdeviceinformation"
 call :CollapseCommandOutput TpmToolType "tpmtool /?"
+chcp %ORIGINAL_CP% >nul
 
 echo Stage 1 done.
 
