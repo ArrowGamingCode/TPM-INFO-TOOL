@@ -953,7 +953,7 @@ function Get-IntelBiosCompliance {
     $tpmObj = Get-CimInstance -Namespace 'Root\Cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm
     $tpmVersion = if ($tpmObj) { $tpmObj.ManufacturerVersion } else { "Unknown" }
 
-    $requiresUpdate = $tpmVersion -match '^INTC 30[23]\.12\.'
+    $requiresUpdate = $tpmVersion -match '30[23]\.12\.'
 
     return [PSCustomObject]@{
         IsIntel                 = $true
