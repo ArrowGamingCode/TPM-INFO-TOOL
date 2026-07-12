@@ -1921,10 +1921,17 @@ function Get-UacStatus {
 
 function Get-CertreqAttestation($Data) {
 	Write-Host "Testing Certreq.." -ForegroundColor White
-    if ($TestFile -and (Test-Path $TestFile)) {
+	if ($TestFile -and (Test-Path $TestFile)) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
-        $certRaw = certreq -q -enrollaik -f -config '""' 2>&1 | Out-String
+        $oldCulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
+        [System.Threading.Thread]::CurrentThread.CurrentUICulture = New-Object System.Globalization.CultureInfo("en-US")
+        try {
+            $certRaw = certreq -q -enrollaik -f -config '""' 2>&1 | Out-String
+        }
+        finally {
+            [System.Threading.Thread]::CurrentThread.CurrentUICulture = $oldCulture
+        }
     }
 	Write-Progress -Activity "Loading System Diagnostics" -Completed
 
