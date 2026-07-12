@@ -56,7 +56,7 @@ $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
-$global:TotalSteps   = 56
+$global:TotalSteps   = 57
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -2054,6 +2054,33 @@ function Test-MSI {
     }
 }
 
+function Get-AgesaVersion {
+    try {
+        $CpuVendor = Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Manufacturer
+        if ($CpuVendor -notmatch 'Advanced Micro Devices|AMD') {
+            Write-Warning "This system does not appear to be running an AMD processor (Vendor: $CpuVendor)."
+            return $null
+        }
+
+        $RawSmbios = Get-CimInstance -Namespace root\wmi -ClassName MSSmBios_RawSMBiosTables -ErrorAction Stop
+        $Bytes = $RawSmbios.SMBiosData
+
+        $AsciiString = [System.Text.Encoding]::ASCII.GetString($Bytes)
+
+        if ($AsciiString -match 'AGESA[^a-zA-Z0-9]*(.{1,20})') {
+            return $Matches[1].Trim()
+        } else {
+            return $null
+        }
+    }
+    catch [UnauthorizedAccessException] {
+        return $null
+    }
+    catch {
+        return $null
+    }
+}
+
 # =========================================================================
 # GUI FORM
 # =========================================================================
@@ -2446,7 +2473,10 @@ function Show-UIOutput ($Data) {
 	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
 	Log-Output "PC Model:     $($Data.PcModel)"
     Log-Output "Motherboard:  $($Data.Mobo)"
-    Log-Output "BIOS:          $($Data.BiosInfo.String)"
+    Log-Output "BIOS:         $($Data.BiosInfo.String)"
+	if ($Data.AgesaVersion) {
+		Log-Output "Agesa:        $($Data.AgesaVersion)"
+	}
 	Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
@@ -2772,7 +2802,8 @@ function Invoke-MainExecution {
 		UACLevel              = $(Step-Progress; Get-UacStatus)
 		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
 		Sha256                = $(Step-Progress; Test-TPMSha256Support)
-		TestMSI              = $(Step-Progress; Test-MSI)
+		TestMSI               = $(Step-Progress; Test-MSI)
+		AgesaVersion          = $(Step-Progress; Get-AgesaVersion)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
