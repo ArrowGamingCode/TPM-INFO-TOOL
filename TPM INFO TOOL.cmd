@@ -2091,6 +2091,12 @@ function Get-AgesaVersion {
     }
 }
 
+function BIOS_TPM_ResetMessage {
+	Log-Output "Reset the TPM from the BIOS. Look for Pending Operation."
+	Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
+	Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
+}
+
 # =========================================================================
 # GUI FORM
 # =========================================================================
@@ -2390,6 +2396,11 @@ function Show-UserRecommendedSteps ($Data) {
 		$hasIssues = $true
 	}
 
+    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0) {
+		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
+		BIOS_TPM_ResetMessage
+        $hasIssues = $true
+    }
 
     if (!$hasIssues) {
         Log-Output "-> NA" 'Green'
