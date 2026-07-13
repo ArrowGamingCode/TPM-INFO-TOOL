@@ -85,42 +85,53 @@ function Get-CpuCompliance {
         $isPassed = $true
         $isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
 
+        $isRyzenAI   = $cpuName -match "Ryzen AI"
+        $isCoreUltra = $cpuName -match "Ultra"
         $genValue = $null
+
         if ($cpuName -match "Intel") {
-            if ($cpuName -match "Core\(TM\) Ultra (\d)") {
-                $genValue = "Gen: $($Matches[1])"
+            if ($isCoreUltra) {
+                if ($cpuName -match "Ultra \d\s+(?:[A-Z]+\s+)?(\d)\d{2}") {
+                    $genValue = "Gen: $($Matches[1])"
+                }
             } elseif ($cpuName -match "i\d-(\d+)") {
                 $modelNum = $Matches[1]
                 if ($modelNum.Length -eq 4) { $genValue = "Gen: $($modelNum.Substring(0, 1))" }
                 elseif ($modelNum.Length -eq 5) { $genValue = "Gen: $($modelNum.Substring(0, 2))" }
             }
-        } elseif ($cpuName -match "AMD.*Ryzen") {
-            if ($cpuName -match "\b(\d)\d{3}\b") {
+        } elseif ($isAmd -and $cpuName -match "Ryzen") {
+            if ($isRyzenAI) {
+                if ($cpuName -match "Ryzen AI \d\s+(?:[A-Z]+\s+)?(\d)\d{2}") {
+                    $genValue = "Gen: $($Matches[1])"
+                }
+            } elseif ($cpuName -match "\b(\d)\d{3}\b") {
                 $genValue = "Gen: $($Matches[1])"
-            } elseif ($cpuName -match "Ryzen AI (\d+)") {
-                $genValue = "Gen: $($Matches[1])"
+            }
+
+            if ($cpuName -match '\b([12]\d{3})[A-Z]*\b') {
+                $isPassed = $false
             }
         }
 
-        if ($cpuName -match 'AMD Ryzen' -and $cpuName -match '\b([12]\d{3})[A-Z]*\b') {
-            $isPassed = $false
-        }
-
         return [PSCustomObject]@{
-            Name   = $cpu.Name
-            Gen    = $genValue
-            Passed = $isPassed
-            Socket = $cpu.SocketDesignation
-            IsAMD  = $isAmd
+            Name        = $cpu.Name
+            Gen         = $genValue
+            Passed      = $isPassed
+            Socket      = $cpu.SocketDesignation
+            IsAMD       = $isAmd
+            IsCoreUltra = $isCoreUltra
+            IsRyzenAI   = $isRyzenAI
         }
     }
     catch {
         return [PSCustomObject]@{
-            Name   = "Unknown"
-            Gen    = ""
-            Passed = $false
-            Socket = "Unknown"
-            IsAMD  = $false
+            Name        = "Unknown"
+            Gen         = ""
+            Passed      = $false
+            Socket      = "Unknown"
+            IsAMD       = $false
+            IsCoreUltra = $false
+            IsRyzenAI   = $false
         }
     }
 }
@@ -426,12 +437,14 @@ function Get-TpmOwnershipState {
                 Text           = $statusText
                 Passed         = $isReady
                 PendingRestart = $pendingRestart
+                ManufacturerIdTxt = $tpmCmd.ManufacturerIdTxt
             }
         } else {
             return [PSCustomObject]@{
                 Text           = "Unable to read TPM Ownership properties via Get-Tpm"
                 Passed         = $false
                 PendingRestart = $null
+                ManufacturerIdTxt = $null
             }
         }
     } catch {
@@ -439,6 +452,7 @@ function Get-TpmOwnershipState {
             Text           = "Error executing TPM Ownership query"
             Passed         = $false
             PendingRestart = $null
+            ManufacturerIdTxt = $null
         }
     }
 }
@@ -1987,8 +2001,18 @@ function Is-NextGenTPM {
         return $true
     }
 
-    if (-not $data.HasEK) {
-        return $true
+	if ($Data.TpmOwnership.ManufacturerIdTxt -eq "MSFT") {
+		return $true
+    }
+
+	if ($Data.CpuInfo.IsCoreUltra) {
+		return $true
+    }
+
+	if ($Data.CpuInfo.IsRyzenAI) {
+		if (-not $data.HasEK) {
+			return $true
+		}
     }
 
     return $false
