@@ -1995,9 +1995,13 @@ function Is-NextGenTPM {
 }
 
 function HasEK {
-	try {
+    try {
         $ek = Get-TpmEndorsementKeyInfo -ErrorAction Stop
-        return $ek.PublicKey
+        if ($ek.PublicKey) {
+            return $true
+        } else {
+            return $false
+        }
     } catch {
         return $false
     }
@@ -2669,6 +2673,8 @@ function Show-UIOutput ($Data) {
 	if ($Data.SocialMedia_UEFICA2023){
 		Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
 	}
+
+	Log-Output "INFO: EK: $($Data.HasEK)"
 
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
     Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
