@@ -59,7 +59,7 @@ $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
-$global:TotalSteps   = 57
+$global:TotalSteps   = 58
 $ScriptVersion = $env:TPM_TOOL_VERSION
 
 # =========================================================================
@@ -1959,12 +1959,7 @@ function Get-CertreqAttestation($Data) {
 	}else{
 		$OverallPassResult = 0;
 
-		$ek = Get-TpmEndorsementKeyInfo
-		if (-not $ek.PublicKey) {
-			$OverallPassResult = 2;
-		}
-
-		if ($Data.Pluton){
+		if (Is-NextGenTPM -Data $Data) {
 			$OverallPassResult = 2;
 		}
 	}
@@ -1979,6 +1974,32 @@ function Get-CertreqAttestation($Data) {
 		EnrollSuccess = $enrollSuccess
 		NameResolutionFailure = $nameResolutionFailure
 		FailureMessage = $failureMessage
+    }
+}
+
+function Is-NextGenTPM {
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$Data
+    )
+
+    if ($Data.Pluton) {
+        return $true
+    }
+
+    if (-not $data.HasEK) {
+        return $true
+    }
+
+    return $false
+}
+
+function HasEK {
+	try {
+        $ek = Get-TpmEndorsementKeyInfo -ErrorAction Stop
+        return $ek.PublicKey
+    } catch {
+        return $false
     }
 }
 
@@ -2092,7 +2113,7 @@ function Get-AgesaVersion {
 }
 
 function BIOS_TPM_ResetMessage {
-	Log-Output "Reset the TPM from the BIOS. Look for Pending Operation."
+	Log-Output "Reset the TPM from the BIOS. Look for 'Pending Operation'."
 	Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
 	Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
 }
@@ -2396,7 +2417,7 @@ function Show-UserRecommendedSteps ($Data) {
 		$hasIssues = $true
 	}
 
-    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0) {
+    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) ) {
 		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
 		BIOS_TPM_ResetMessage
         $hasIssues = $true
@@ -2825,6 +2846,7 @@ function Invoke-MainExecution {
 		Sha256                = $(Step-Progress; Test-TPMSha256Support)
 		TestMSI               = $(Step-Progress; Test-MSI)
 		AgesaVersion          = $(Step-Progress; Get-AgesaVersion)
+		HasEK			      = $(Step-Progress; HasEK)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
