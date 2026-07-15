@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.9"
+set "TPM_TOOL_VERSION=1.0.11"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
