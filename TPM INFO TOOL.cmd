@@ -1967,10 +1967,14 @@ function Get-CertreqAttestation($Data) {
 
 	$nameResolutionFailure = $certRaw -match "The server name or address could not be resolved"
 	$failureType1 = $certRaw -match "1168 ERROR_NOT_FOUND"
+	$serverOverload = $certRaw -match "Too Many Requests"
 
 	$failureMessage = ""
 	if($failureType1){
 		$failureMessage = "[FAIL] CertReq - registry issue?"
+	}
+	if($serverOverload ){
+		$failureMessage = "[FAIL] Server Overloaded - Please run again"
 	}
 
 	$IsOverallAIKPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
@@ -1981,6 +1985,10 @@ function Get-CertreqAttestation($Data) {
 		$OverallPassResult = 0;
 
 		if (Is-NextGenTPM -Data $Data) {
+			$OverallPassResult = 2;
+		}
+
+		if($serverOverload){
 			$OverallPassResult = 2;
 		}
 	}
