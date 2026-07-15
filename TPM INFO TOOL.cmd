@@ -1290,6 +1290,7 @@ function Show-FixMenu {
     Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
     Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
 	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
+	Write-Host "4) Print PCR Table"                               -ForegroundColor White
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
 
@@ -1305,6 +1306,11 @@ function Show-FixMenu {
         }
         "3" {
             Reset-ActivisionKey
+        }
+        "4" {
+            Print-PCRTable
+			pause
+			Show-FixMenu
         }
         "Q" {
 			cls
