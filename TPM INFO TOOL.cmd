@@ -1462,30 +1462,31 @@ function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
 
 function Show-PCR_Message() {
     $HasFailures = $false
-    $FailedRegisters = @()
+    $FailedRegisters = [System.Collections.Generic.List[string]]::new()
+	$MatchCount = 0
 
     Get-PCR | ForEach-Object {
+
         if ($_ -match 'PCR\[(?<num>\d+)\]') {
             $pcrNum = $Matches['num']
+            $CleanedLine = $_.Trim(" |!`r`n")
             if ($_ -match 'MISMATCH|Failed|Error') {
                 $HasFailures = $true
-                $FailedRegisters += "PCR[$pcrNum]"
-            }
-        }
-
-        if ($_ -match 'PCR\[00?\]') {
-            $CleanedLine = $_.Trim(" |!`r`n")
-
-            if ($CleanedLine -match 'MISMATCH|Failed|Error') {
+                $FailedRegisters.Add("PCR[$pcrNum]")
                 Log-Output $CleanedLine 'Red'
-            } else {
+            }
+            elseif ($pcrNum -eq '00' -or $pcrNum -eq '0') {
                 Log-Output $CleanedLine 'White'
             }
+
+			if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
+				$MatchCount++
+			}
         }
     }
 
-    if ($HasFailures -eq $false) {
-        Log-Output "[PASS] Hardware log verification matches live PCR registers." 'Green'
+    if (-not $HasFailures) {
+        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
     } else {
         Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
