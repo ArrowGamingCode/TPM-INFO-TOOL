@@ -82,7 +82,8 @@ function Get-CpuCompliance {
     try {
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
-        $isPassed = $true
+        $oldAMD = $false
+		$fakeOldAMD = $false
         $isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
 
         $isRyzenAI   = $cpuName -match "Ryzen AI"
@@ -109,14 +110,21 @@ function Get-CpuCompliance {
             }
 
             if ($cpuName -match '\b([12]\d{3})[A-Z]*\b') {
-                $isPassed = $false
+                $oldAMD = $true
             }
+
+			$fake3rdGenRegex = '\b(3200G|3400G|3100U|3200U|3250U|3250C|3300U|3500U|3500C|3501U|3550H|3580U|3700U|3700C|3750H|3780U|3000G|300GE|3050U|3050e|3050C|3150U|3150G|3150GE)\b'  
+			if ($cpuName -match $fake3rdGenRegex) {
+				$oldAMD     = $true
+				$fakeOldAMD = $true
+			}
         }
 
         return [PSCustomObject]@{
             Name        = $cpu.Name
             Gen         = $genValue
-            Passed      = $isPassed
+            OldAMD      = $isPassed
+			FakeOldAMD  = $fakeOldAMD
             Socket      = $cpu.SocketDesignation
             IsAMD       = $isAmd
             IsCoreUltra = $isCoreUltra
@@ -127,7 +135,8 @@ function Get-CpuCompliance {
         return [PSCustomObject]@{
             Name        = "Unknown"
             Gen         = ""
-            Passed      = $false
+			FakeOldAMD  = $false
+            OldAMD      = $false
             Socket      = "Unknown"
             IsAMD       = $false
             IsCoreUltra = $false
@@ -2374,10 +2383,16 @@ function Show-UserRecommendedSteps ($Data) {
     Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
     $hasIssues = $false
 
-    if (!$Data.CpuInfo.Passed) {
+    if ($Data.CpuInfo.OldAMD) {
         Log-Output "-> [WARNING] Incompatible CPU detected" 'Yellow'
+
+		if ($Data.CpuInfo.FakeOldAMD) {
+			Log-Output "CPU is branded as 3rd gen, but is really a 2nd gen." 'Yellow'
+		}
+
 		Log-Output "-> Please manually confirm your CPU is not a 1st or 2nd gen Ryzen, as these CPUs do not support TPM Attestation." 'Yellow'
-		Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 3rd gen or later." 'Yellow'
+		Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 4th gen or later." 'Yellow'
+		Log-Output "-> (Most 3rd Gens work, but best to get 4th)" 'Yellow'
         $hasIssues = $true
     }
 
