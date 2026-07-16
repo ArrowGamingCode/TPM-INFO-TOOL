@@ -2375,7 +2375,9 @@ function Show-UserRecommendedSteps ($Data) {
     $hasIssues = $false
 
     if (!$Data.CpuInfo.Passed) {
-        Log-Output "-> Check your CPU is not a 1st or 2nd gen Ryzen as TPM Attestation is not supported." 'Yellow'
+        Log-Output "-> [WARNING] Incompatible CPU detected" 'Yellow'
+		Log-Output "-> Please manually confirm your CPU is not a 1st or 2nd gen Ryzen, as these CPUs do not support TPM Attestation." 'Yellow'
+		Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 3rd gen or later." 'Yellow'
         $hasIssues = $true
     }
 
