@@ -1764,11 +1764,11 @@ function Test-SecurityCompliance {
             if ($type -match "EV_EFI_VARIABLE_DRIVER_CONFIG" -or $type -match "80000001") {
                 $hasPcr7Variables = $true
                 if ($data -match "SecureBoot") {
-					if ($data -match "Hex:\s*00") {
-						$check_secureBootState = "?"
-					} else {
-						$check_secureBootState = "Pass"
-					}
+                    if ($data -match "Hex:\s*00") {
+                        $check_secureBootState = "Fail"
+                    } else {
+                        $check_secureBootState = "Pass"
+                    }
                 }
                 if ($data -match "PK")  { $check_pkKeyPresent  = $true }
                 if ($data -match "KEK") { $check_kekKeyPresent = $true }
@@ -1780,7 +1780,7 @@ function Test-SecurityCompliance {
             }
         }
         if ($event.PCRIndex -eq 13 -and $data -match "bootmgfw.efi") {
-            if ($data -match "debug=true" -or $data -match "bootdebug=true") { $check_kernelDebug = "Enabled (Insecure)" }
+            if ($data -match "debug=true" -or $data -match "bootdebug=true") { $check_kernelDebug = "Fail" }
             else { $check_kernelDebug = "Pass" }
         }
         if ($event.PCRIndex -eq 13 -and ($data -match "VbsSiPolicy.p7b" -or $data -match "siPolicy")) {
@@ -1792,36 +1792,41 @@ function Test-SecurityCompliance {
         $check_pcr7Attestation = $true
     }
 
-    return [PSCustomObject]@{
-        SecureBootState = $check_secureBootState
-        PkKeyPresent    = if ($check_pkKeyPresent) { "Pass" } else { "?" }
-        KekKeyPresent   = if ($check_kekKeyPresent) { "Pass" } else { "?" }
-        DbKeyPresent    = if ($check_dbKeyPresent) { "Pass" } else { "?" }
-        DbxKeyPresent   = if ($check_dbxKeyPresent) { "Pass" } else { "?" }
-        KernelDebug     = $check_kernelDebug
-        Pcr7Attestation = if ($check_pcr7Attestation) { "Pass" } else { "?" }
+    $failedChecks = @()
+
+    if ($check_secureBootState -ne "Pass") { $failedChecks += "SecureBootState" }
+    if (-not $check_pkKeyPresent)          { $failedChecks += "PkKeyPresent" }
+    if (-not $check_kekKeyPresent)         { $failedChecks += "KekKeyPresent" }
+    if (-not $check_dbKeyPresent)          { $failedChecks += "DbKeyPresent" }
+    if (-not $check_dbxKeyPresent)         { $failedChecks += "DbxKeyPresent" }
+    if ($check_kernelDebug -ne "Pass")     { $failedChecks += "KernelDebug" }
+    if (-not $check_pcr7Attestation)       { $failedChecks += "Pcr7Attestation" }
+
+    if ($failedChecks.Count -eq 0) {
+        return [PSCustomObject]@{
+            message  = "[Pass] Measured Boot Check"
+            pass = $true
+        }
+    } else {
+        return [PSCustomObject]@{
+            message  = "[WARN] Measured Boot Check: $($failedChecks -join ', ')"
+            pass = $false
+        }
     }
 }
 
-
 function Show-TcgAttestationAudit ($Data) {
-	$TcgData =  $Data.MeasuredBootCompliance
-
-    Log-Output "--- MEASURED BOOT BINARY AUDIT (EXPERIMENTAL) ---" 'Cyan'
+    Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
 	Show-PCR_Message
 
 	if($Data.ComparedKeyId){
 		Log-Output $Data.ComparedKeyId
 	}
 
-	if ($TcgData) {
-		Log-Output "SecureBoot State: $($TcgData.SecureBootState)"
-		Log-Output "Platform Key:       $($TcgData.PkKeyPresent)"
-		Log-Output "Key Exchange Keys: $($TcgData.KekKeyPresent)"
-		Log-Output "DB Signature database:   $($TcgData.DbKeyPresent)"
-		Log-Output "DBX Revocation list:    $($TcgData.DbxKeyPresent)"
-		Log-Output "No Kernel Debugging:        $($TcgData.KernelDebug)"
-		Log-Output "PCR7 Log Binding Valid:  $($TcgData.Pcr7Attestation)"
+	if($Data.MeasuredBootCompliance.pass){
+		Log-Output $Data.MeasuredBootCompliance.message 'Green'
+	}else{
+		Log-Output $Data.MeasuredBootCompliance.message 'Yellow'
 	}
 	write-host ""
 }
