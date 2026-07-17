@@ -1301,6 +1301,7 @@ function Show-FixMenu {
     Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
 	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
 	Write-Host "4) Print PCR Table"                               -ForegroundColor White
+	Write-Host "5) Print DBX Table"                               -ForegroundColor White
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
 
@@ -1319,6 +1320,11 @@ function Show-FixMenu {
         }
         "4" {
             Print-PCRTable
+			pause
+			Show-FixMenu
+        }
+        "5" {
+            Print-DBX | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap
 			pause
 			Show-FixMenu
         }
@@ -1425,6 +1431,32 @@ function Reset-ActivisionKey {
     } catch {
        Show-FixMenu "Error: $($_.Exception.Message)"
     }
+}
+
+function Print-DBX {
+    $script:dbxData = (Get-SecureBootUEFI -Name dbx -Decoded) | Select-Object `
+        @{N='Authority CN'; E={
+            if ($_.Authority) {
+                $_.Authority -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+            } elseif ($_.Subject) {
+                $_.Subject -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+            } else {
+                "N/A (Raw Hash)"
+            }
+        }},
+        @{N='Description'; E={
+            if ($_.Description) { $_.Description }
+            elseif ($_.Company) { $_.Company }
+            else { "N/A" }
+        }},
+        @{N='Hash'; E={
+            if ($_.Hash) { $_.Hash }
+            elseif ($_.Fingerprint) { $_.Fingerprint }
+            else { $_.SerialNumber }
+        }}
+
+    # Return the variable so it still outputs to console if desired
+    return $script:dbxData
 }
 
 # =========================================================================
