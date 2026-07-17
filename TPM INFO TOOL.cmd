@@ -53,7 +53,7 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
-$global:TotalSteps   = 58
+$global:TotalSteps   = 59
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -2209,6 +2209,16 @@ function BIOS_TPM_ResetMessage {
 	Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
 }
 
+function Get-LatestUpdatesSummary {
+    $updates = Get-HotFix | Where-Object { $_.InstalledOn }
+    if (-not $updates) { return "No updates found with valid dates." }
+
+    $latestDate = ($updates | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn.Date
+    $kbList = ($updates | Where-Object { $_.InstalledOn.Date -eq $latestDate }).HotFixID -join ", "
+
+    return "$($latestDate.ToString('dd/MM/yyyy')): $kbList"
+}
+
 # =========================================================================
 # GUI FORM
 # =========================================================================
@@ -2782,6 +2792,7 @@ function Show-UIOutput ($Data) {
 	}
 
 	Log-Output "INFO: EK: $($Data.HasEK)"
+	Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
     Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
     Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
@@ -2960,6 +2971,7 @@ function Invoke-MainExecution {
 		TestMSI               = $(Step-Progress; Test-MSI)
 		AgesaVersion          = $(Step-Progress; Get-AgesaVersion)
 		HasEK			      = $(Step-Progress; HasEK)
+		LatestUpdatesSummary  = $(Step-Progress; Get-LatestUpdatesSummary)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
