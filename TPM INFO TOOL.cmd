@@ -53,14 +53,15 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
+$global:TotalSteps   = 58
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
-$global:TotalSteps   = 58
 $ScriptVersion = $env:TPM_TOOL_VERSION
+$global:HasPCRFailures = $false
 
 # =========================================================================
 # FUNCTIONS
@@ -1502,6 +1503,7 @@ function Show-PCR_Message() {
 
     if (-not $HasFailures) {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
+		$global:HasPCRFailures = $true
     } else {
         Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
@@ -2383,8 +2385,13 @@ function Show-UserRecommendedSteps ($Data) {
     Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
     $hasIssues = $false
 
+	function Has-Issue {
+		Set-Variable -Name 'hasIssues' -Value $true -Scope 1
+		Log-Output ""
+	}
+
     if ($Data.CpuInfo.OldAMD) {
-        Log-Output "-> [WARNING] Incompatible CPU detected" 'Yellow'
+        Log-Output "[WARNING] Incompatible CPU detected" 'Yellow'
 
 		if ($Data.CpuInfo.FakeOldAMD) {
 			Log-Output "CPU is branded as 3rd gen, but is really a 2nd gen." 'Yellow'
@@ -2393,98 +2400,105 @@ function Show-UserRecommendedSteps ($Data) {
 		Log-Output "-> Please manually confirm your CPU is not a 1st or 2nd gen Ryzen, as these CPUs do not support TPM Attestation." 'Yellow'
 		Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 4th gen or later." 'Yellow'
 		Log-Output "-> (Most 3rd Gens work, but best to get 4th)" 'Yellow'
-        $hasIssues = $true
+        Has-Issue
     }
 
 	if ($Data.TpmInfo.AmdFixRequired) {
         if ($Data.BitLocker -and $Data.BitLocker.Passed -eq $false) {
-            Log-Output "-> Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
+            Log-Output "Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
         } else {
-            Log-Output "-> Your current AMD TPM firmware version requires an update, but you have bitlocker." 'Yellow'
+            Log-Output "Your current AMD TPM firmware version requires an update, but you have bitlocker." 'Yellow'
         }
-        $hasIssues = $true
+        Has-Issue
     }
 
     if (!$Data.SecureBoot.Passed) {
-        Log-Output "-> SECURE BOOT is showing OFF: Check its on." 'Yellow'
-        $hasIssues = $true
+        Log-Output "SECURE BOOT is showing OFF: Check its on." 'Yellow'
+        Has-Issue
     }
 
     if (!$Data.CsmInfo.Passed) {
-        Log-Output "-> Your system is running in Legacy/CSM mode instead of modern UEFI mode." 'Yellow'
-        $hasIssues = $true
+        Log-Output "Your system is running in Legacy/CSM mode instead of modern UEFI mode." 'Yellow'
+        Has-Issue
     }
 
     if (!$Data.BiosInfo.Passed) {
 		if ($Data.CpuInfo.Socket -eq "AM4") {
 			Log-Output "ALL AM4 systems need a BIOS update after ~August 2025. Check if there is a newer BIOS" 'Yellow'
 		} else {
-			Log-Output "-> Check if there is a newer BIOS" 'Yellow'
+			Log-Output "Check if there is a newer BIOS" 'Yellow'
 		}
-        $hasIssues = $true
+        Has-Issue
     }
 
 	if ($Data.IntelBiosInfo.IsIntel -and $Data.IntelBiosInfo.RequiresFirmwareUpdate) {
-        Log-Output "-> Your Intel PTT Firmware version ($($Data.IntelBiosInfo.Version)) appears to be outdated. Update BIOS/Firmware" 'Yellow'
-        $hasIssues = $true
+        Log-Output "Your Intel PTT Firmware version ($($Data.IntelBiosInfo.Version)) appears to be outdated. Update BIOS/Firmware" 'Yellow'
+        Has-Issue
     }
 
 	if (!$Data.CompatibilityFlags.Passed) {
-        Log-Output "-> COD is intended to run without any compatibility or admin flags." 'Yellow'
-        $hasIssues = $true
+        Log-Output "COD is intended to run without any compatibility or admin flags." 'Yellow'
+        Has-Issue
     }
 
 	if ($Data.doesThirdPartySecurityExist.Passed -and $Data.OverallPassResult -eq 1) {
-        Log-Output "-> [WARNING] A third-party Antivirus was detected!" 'Yellow'
-        Log-Output "   WHY: Aggressive third-party security software can block CoD." 'Yellow'
-		Log-Output "   WHEN: If you have problems."
-        Log-Output "   HOW TO FIX: Whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
-        $hasIssues = $true
+        Log-Output "[WARNING] A third-party Antivirus was detected!" 'Yellow'
+        Log-Output "-> WHY: Aggressive third-party security software can block CoD." 'Yellow'
+		Log-Output "-> WHEN: If you have problems."
+        Log-Output "-> HOW TO FIX: Whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
+        Has-Issue
     }
 
 	if (!$Data.CodBroker.Passed) {
-        Log-Output "-> [FIX REQUIRED] The COD Broker Service is broken" 'Red'
-        Log-Output "Please uninstall CoD and then install again." 'White'
-        $hasIssues = $true
+        Log-Output "[FIX REQUIRED] The COD Broker Service is broken" 'Red'
+        Log-Output "-> Please uninstall CoD and then install again." 'White'
+        Has-Issue
     }
 
 	if ($Data.SecureBoot.Passed -and !$Data.SecureBootType.Passed) {
-        Log-Output "-> [WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
-        Log-Output "   WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
-        Log-Output "   HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
-        $hasIssues = $true
+        Log-Output "WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
+        Log-Output "-> [WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
+        Log-Output "-> [HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
+        Has-Issue
     }
 
 	if ($Data.Pluton -and -not $Data.OverallPassResult -eq 1) {
-        Log-Output "-> [WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
+        Log-Output "[WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
 		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
-        $hasIssues = $true
 
 		if ($Data.TestMSI.IsMSI){
 			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
 		}
+		Has-Issue
     }
 
 	if ($Data.NameResolutionFailure) {
 		Log-Output "Cannot connect to the cloud attestation server. Firewall or ISP may be blocking certreq" 'Red'
-		Log-Output "->Check you have internet" 'Red'
-		$hasIssues = $true
+		Log-Output "-> Check you have internet" 'Red'
+		Has-Issue
 	}
 
 	if (!$Data.MicrosoftCa.Passed) {
-		Log-Output "-> [WARNING] Windows UEFI CA 2023 not found"  'Yellow'
-		Log-Output "   COD MAY need this updated. However, irrespective of COD, its best practice to have this."
-		$hasIssues = $true
+		Log-Output "[WARNING] Windows UEFI CA 2023 not found"  'Yellow'
+		Log-Output "-> COD MAY need this updated. However, irrespective of COD, its best practice to have this."
+		Has-Issue
 	}
 
     if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) ) {
 		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
 		BIOS_TPM_ResetMessage
-        $hasIssues = $true
+        Has-Issue
     }
 
+	if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($global:HasPCRFailures) ) {
+		Log-Output "PCR MISMATCH'." 'Yellow'
+		Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
+		Log-Output "-> Change:Secure Boot Security Mode From: Standard To: Custom > Maximum Security"
+		Has-Issue
+	}
+
     if (!$hasIssues) {
-        Log-Output "-> NA" 'Green'
+        Log-Output "NA" 'Green'
     }
 }
 
