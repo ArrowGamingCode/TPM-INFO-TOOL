@@ -1809,7 +1809,7 @@ function Show-TcgAttestationAudit ($Data) {
 	Show-PCR_Message
 
 	if($Data.ComparedKeyId){
-		Log-Output $Data.ComparedKeyId
+		Log-Output "[PASS] Key Comp" 'Green'
 	}
 
 	if($Data.MeasuredBootCompliance.pass){
@@ -2094,7 +2094,7 @@ function Compare-TpmKeyId {
 	}
 
     if ($certKeyId -eq $tpmKeyId) {
-        return "Key Comp: Pass"
+        return $true
     }
 
     return $false
