@@ -2634,7 +2634,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
-    if (!$Data.CpuInfo.Passed) { Log-Output 'CRITICAL: Old CPUs may not be supported' 'Red' }
+    if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
     if ($Data.TpmInfo.Passed)  { Log-Output 'RESULT: TPM 2.0 Version Pass' 'Green' } else { Log-Output "CRITICAL: $($Data.TpmInfo.Text)" 'Red' }
 
     if ($Data.TpmOwnership.Passed) {
