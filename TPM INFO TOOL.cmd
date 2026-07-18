@@ -277,42 +277,31 @@ function Get-SecureBootSetupType {
 }
 
 function Get-SecureBootKeysType {
-    function Get-SingleKeyType ($KeyName) {
-        try {
-            $RawKey = Get-SecureBootUEFI -Name $KeyName -ErrorAction Stop
-            $TextData = [System.Text.Encoding]::ASCII.GetString($RawKey.Bytes)
-
-            if ($TextData -match "Microsoft") {
-                return "Microsoft Certified"
-            } elseif ($TextData -match "ASUS" -or $TextData -match "Asustek") {
-                return "ASUS Factory"
-            } elseif ($TextData -match "Gigabyte") {
-                return "Gigabyte Factory"
-            } elseif ($TextData -match "MSI" -or $TextData -match "Micro-Star") {
-                return "MSI Factory"
-            } elseif ($TextData -match "HP " -or $TextData -match "Hewlett-Packard") {
-                return "HP Factory"
-            } elseif ($TextData -match "Dell") {
-                return "Dell Factory"
-            } elseif ([string]::IsNullOrEmpty($TextData.Trim())) {
-                return "Empty / Not Set"
-            } else {
-                $CleanedText = $TextData -replace '[^a-zA-Z0-9\s\-\.\,\(\)]', ''
-                $IssuerMatch = [regex]::Match($CleanedText, "(CN=|O=|OU=)[A-Za-z0-9\s\.\-]+")
-                if ($IssuerMatch.Success) {
-                    return "Custom ($($IssuerMatch.Value))"
+    try {
+        function Parse-UefiCert ($KeyName) {
+            $Certs = Get-SecureBootUEFI -Name $KeyName -Decoded 2>$null
+            if ($Certs) {
+                foreach ($Cert in $Certs) {
+                    $CN = if ($Cert.Subject -match 'CN=([^,]+)') { $Matches[1] } else { 'Unknown' }
+                    [PSCustomObject]@{
+                        CN           = $CN
+                        SerialNumber = $Cert.SerialNumber
+                    }
                 }
-                return "Custom / User-Generated"
             }
-        } catch {
-            return "Unreadable (Secure Boot Off or Setup Mode)"
         }
-    }
 
-    return [PSCustomObject]@{
-        PK  = Get-SingleKeyType 'PK'
-        KEK = Get-SingleKeyType 'KEK'
-        DB  = Get-SingleKeyType 'db'
+        [PSCustomObject]@{
+            PlatformKey    = Parse-UefiCert -KeyName 'PK'
+            KeyExchangeKey = Parse-UefiCert -KeyName 'KEK'
+            DbKey          = Parse-UefiCert -KeyName 'db'
+        }
+    } catch {
+        [PSCustomObject]@{
+            PlatformKey    = 'error'
+            KeyExchangeKey = 'error'
+            DbKey          = 'error'
+        }
     }
 }
 
@@ -2794,10 +2783,20 @@ function Show-UIOutput ($Data) {
 	Log-Output "INFO: EK: $($Data.HasEK)"
 	Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
-    Log-Output "`n--- SECURE BOOT KEYS DETECTED ---" 'Cyan'
-    Log-Output "Platform Key (PK):           $($Data.SbKeys.PK)"
-    Log-Output "Key Exchange Key (KEK):    $($Data.SbKeys.KEK)"
-    Log-Output "Authorized DB Key:         $($Data.SbKeys.DB)"
+    Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
+
+	Log-Output "PK" -Color "Cyan"
+	$Data.SbKeys.PlatformKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+		Log-Output $_
+	}
+	Log-Output "KEK" -Color "Cyan"
+	$Data.SbKeys.KeyExchangeKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+		Log-Output $_
+	}
+	Log-Output "DB" -Color "Cyan"
+	$Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
+		Log-Output $_
+	}
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
