@@ -53,7 +53,7 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
-$global:TotalSteps   = 59
+$global:TotalSteps   = 60
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -2208,6 +2208,30 @@ function Get-LatestUpdatesSummary {
     return "$($latestDate.ToString('dd/MM/yyyy')): $kbList"
 }
 
+function Get-EventId87 {
+    try {
+        $OneWeekAgo = (Get-Date).AddDays(-7)
+        $Filter = @{
+            LogName   = 'Application'
+            Id        = 87
+            StartTime = $OneWeekAgo
+        }
+
+        $Events = Get-WinEvent -FilterHashtable $Filter -MaxEvents 2 -ErrorAction Stop
+
+        foreach ($Event in $Events) {
+            if ($Event.Message -match 'Submit\(ChallengeAnswer\):\s*(.*)') {
+                $Answer = $Matches[1].Trim()
+                # Merges the date and string together into a single plain text line
+                "$($Event.TimeCreated) - $Answer"
+            }
+        }
+    }
+    catch {
+        Write-Error $_
+    }
+}
+
 # =========================================================================
 # GUI FORM
 # =========================================================================
@@ -2802,6 +2826,11 @@ function Show-UIOutput ($Data) {
     $certOut = $Data.certRaw | Protect-AIKPrivacy
     Log-Output $certOut 'Green'
 
+	Log-Output "Old Events" 'Cyan'
+	$Data.EventId87 | ForEach-Object {
+		Log-Output $_
+	}
+
 	if ($Data.IsOverallAIKPass) {
 		Log-Output "[PASS] OverallAIKResult" 'Green'
 	}else{
@@ -2945,6 +2974,7 @@ function Invoke-MainExecution {
 		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
 		CoreIsolation         = $(Step-Progress; Get-CoreIsolationHardwareStatus)
 		IntelMeVersion        = $(Step-Progress; Get-IntelMeVersion)
+		EventId87			  = $(Step-Progress; Get-EventId87)
 		TpmEndorsement        = $(Step-Progress; Get-TpmEndorsementCertStatus)
 		OriginalOSBuild       = $(Step-Progress; $originalOS)
 		DaysSinceInstall      = $(Step-Progress; [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays))
