@@ -152,18 +152,18 @@ function Get-BatteryStatus {
         if ($battery) {
             $status = ($battery | Select-Object -First 1).Status
             return [PSCustomObject]@{
-                Text    = "Detected (Status: $status)"
+                Text    = "Laptop"
                 Present = $true
             }
         } else {
             return [PSCustomObject]@{
-                Text    = "No Battery Detected (Desktop/Fixed PC)"
+                Text    = "Desktop"
                 Present = $false
             }
         }
     } catch {
         return [PSCustomObject]@{
-            Text    = "Unknown / Error checking battery"
+            Text    = "Unknown"
             Present = $false
         }
     }
@@ -2735,8 +2735,8 @@ function Show-UIOutput ($Data) {
 	}
 
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
-    Log-Output "Battery:      $($Data.BatteryInfo.Text)"
-    Log-Output "Partition:    $($Data.PartitionStyle)"
+    Log-Output "Battery: $($Data.BatteryInfo.Text)"
+    Log-Output "Partition: $($Data.PartitionStyle)"
 	Log-Output "Activision Key: $($Data.ActivisionKey)"
 
     Show-PlatformStatus
