@@ -1531,6 +1531,31 @@ function Show-PCR_Message() {
     }
 }
 
+function Get-PC-ID {
+    [CmdletBinding()]
+    param ()
+
+    try {
+        $MachineSystemProduct = Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop
+        $HardwareUuid         = $MachineSystemProduct.UUID
+
+        $CryptoMd5Provider = [System.Security.Cryptography.MD5]::Create()
+        $RawUuidBytes      = [System.Text.Encoding]::UTF8.GetBytes($HardwareUuid)
+        $ComputedHashBytes = $CryptoMd5Provider.ComputeHash($RawUuidBytes)
+
+        $DeterministicIntId = [System.Math]::Abs([System.BitConverter]::ToInt32($ComputedHashBytes, 0))
+
+        $SevenDigitBaseValue = ($DeterministicIntId % 9000000) + 1000000
+        $BaseStringValue     = $SevenDigitBaseValue.ToString()
+
+        $CryptoMd5Provider.Dispose()
+        return $BaseStringValue
+    }
+    catch {
+        return "0000000"
+    }
+}
+
 function Get-Win10SupportStatus {
     $OS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
 
