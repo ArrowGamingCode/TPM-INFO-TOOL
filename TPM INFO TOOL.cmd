@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.12"
+set "TPM_TOOL_VERSION=1.0.13"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -62,6 +62,7 @@ $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
 $global:HasPCRFailures = $false
+$global:EnableUploadFeature = $false
 
 # =========================================================================
 # FUNCTIONS
@@ -1556,6 +1557,10 @@ function Get-PC-ID {
     }
 }
 
+function Get-URL {
+    return "http://127.0.0.1/INFO_TOOL/"
+}
+
 function Get-Win10SupportStatus {
     $OS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
 
@@ -2270,196 +2275,273 @@ function Show-TpmGuiFormMessage {
         $AttestationPass
     )
 
-    $ColorMap = @{
-        "Cyan"       = [System.Drawing.Color]::Cyan
-        "DarkRed"    = [System.Drawing.Color]::Crimson
-        "DarkYellow" = [System.Drawing.Color]::Gold
-        "Blue"       = [System.Drawing.Color]::DeepSkyBlue
-        "Green"      = [System.Drawing.Color]::Lime
-        "Red"        = [System.Drawing.Color]::OrangeRed
-        "Yellow"     = [System.Drawing.Color]::Yellow
-        "White"      = [System.Drawing.Color]::White
+    [System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+
+    $exceptionHandler = {
+        param($sender, $eventArgs)
     }
+    [System.Windows.Forms.Application]::add_ThreadException($exceptionHandler)
 
-    if ($AttestationPass -eq 1) {
-        $statusText  = "Pass"
-        $statusColor = [System.Drawing.Color]::Green
-    } elseif ($AttestationPass -eq 0) {
-        $statusText  = "Fail"
-        $statusColor = [System.Drawing.Color]::Red
-    } else {
-        $statusText  = "UNKNOWN"
-        $statusColor = [System.Drawing.Color]::Yellow
-    }
-
-
-    $form = New-Object System.Windows.Forms.Form -Property @{
-        Text            = "TPM INFO TOOL"
-        Size            = New-Object System.Drawing.Size(570, 230)
-        StartPosition   = "CenterScreen"
-        FormBorderStyle = "FixedSingle"
-        MaximizeBox     = $false
-        BackColor       = [System.Drawing.Color]::White
-        TopMost         = $true
-    }
-
-    $lblTitle = New-Object System.Windows.Forms.Label -Property @{
-        Location = New-Object System.Drawing.Point(30, 30)
-        Size     = New-Object System.Drawing.Size(220, 30)
-        Text     = "OVERALL: TPM Attestation"
-        Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    }
-    $form.Controls.Add($lblTitle)
-
-    $lblStatus = New-Object System.Windows.Forms.Label -Property @{
-        Location  = New-Object System.Drawing.Point(255, 30)
-        Size      = New-Object System.Drawing.Size(100, 30)
-        Text      = $statusText
-        Font      = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-        ForeColor = $statusColor
-    }
-    $form.Controls.Add($lblStatus)
-
-    $lblNotice = New-Object System.Windows.Forms.Label -Property @{
-        Location  = New-Object System.Drawing.Point(30, 75)
-        Size      = New-Object System.Drawing.Size(490, 45)
-        Text      = "All information has been copied to your clipboard ready to paste into a forum!"
-        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Italic)
-        ForeColor = [System.Drawing.Color]::DarkSlateGray
-    }
-    $form.Controls.Add($lblNotice)
-
-    $btnClose = New-Object System.Windows.Forms.Button -Property @{
-        Location = New-Object System.Drawing.Point(30, 135)
-        Size     = New-Object System.Drawing.Size(150, 35)
-        Text     = "Close"
-        Font     = New-Object System.Drawing.Font("Segoe UI", 10)
-        TabIndex = 0
-    }
-    $btnClose.Add_Click({ $form.Close() })
-    $form.Controls.Add($btnClose)
-
-    $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
-        Location = New-Object System.Drawing.Point(200, 135)
-        Size     = New-Object System.Drawing.Size(160, 35)
-        Text     = "Save Results to Image"
-        Font     = New-Object System.Drawing.Font("Segoe UI", 10)
-    }
-
-    $btnSaveImg.Add_Click({
-        $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
-            Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
-            Title    = "Save Tool Text Report"
-            FileName = "TPM_Attestation_Report.png"
+    try {
+        $ColorMap = @{
+            "Cyan"       = [System.Drawing.Color]::Cyan
+            "DarkRed"    = [System.Drawing.Color]::Crimson
+            "DarkYellow" = [System.Drawing.Color]::Gold
+            "Blue"       = [System.Drawing.Color]::DeepSkyBlue
+            "Green"      = [System.Drawing.Color]::Lime
+            "Red"        = [System.Drawing.Color]::OrangeRed
+            "Yellow"     = [System.Drawing.Color]::Yellow
+            "White"      = [System.Drawing.Color]::White
         }
 
-        if ($saveDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-            $textFont    = New-Object System.Drawing.Font("Courier New", 12)
-            $bitmapWidth = 1100
-            $padding     = 20
-
-            $testBitmap   = New-Object System.Drawing.Bitmap(1, 1)
-            $testGraphics = [System.Drawing.Graphics]::FromImage($testBitmap)
-
-            $currentX = $padding
-            $currentY = $padding
-            $lineHeight = [Math]::Ceiling($testGraphics.MeasureString("X", $textFont).Height)
-
-            foreach ($item in $global:ImageBuffer) {
-                $lines = $item.Text -split "`r`n" -split "`n"
-                for ($i = 0; $i -lt $lines.Count; $i++) {
-                    $lineText = $lines[$i]
-                    $textSize = $testGraphics.MeasureString($lineText, $textFont)
-
-                    if ($i -gt 0) {
-                        $currentX = $padding
-                        $currentY += $lineHeight
-                    }
-
-                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
-                        $currentX += $textSize.Width
-                    } else {
-                        $currentX = $padding
-                        $currentY += $lineHeight
-                    }
-                }
-            }
-            $bitmapHeight = $currentY + $padding
-
-            $testGraphics.Dispose()
-            $testBitmap.Dispose()
-
-            $bitmap   = New-Object System.Drawing.Bitmap($bitmapWidth, $bitmapHeight)
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-
-            $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
-            $graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-            $graphics.Clear([System.Drawing.Color]::Black)
-
-            $currentX = $padding
-            $currentY = $padding
-
-            foreach ($item in $global:ImageBuffer) {
-                $drawingColor = $ColorMap[$item.Color]
-                if ($null -eq $drawingColor) { $drawingColor = [System.Drawing.Color]::White }
-                $brush = New-Object System.Drawing.SolidBrush($drawingColor)
-
-                $lines = $item.Text -split "`r`n" -split "`n"
-                for ($i = 0; $i -lt $lines.Count; $i++) {
-                    $lineText = $lines[$i]
-
-                    if ($i -gt 0) {
-                        $currentX = $padding
-                        $currentY += $lineHeight
-                    }
-
-                    $graphics.DrawString($lineText, $textFont, $brush, $currentX, $currentY)
-                    $textSize = $graphics.MeasureString($lineText, $textFont)
-
-                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
-                        $currentX += ($textSize.Width - ($textFont.Size * 0.4))
-                    } else {
-                        $currentX = $padding
-                        $currentY += $lineHeight
-                    }
-                }
-                $brush.Dispose()
-            }
-
-            $graphics.Flush()
-
-            $extension = [System.IO.Path]::GetExtension($saveDialog.FileName).ToLower()
-            $imageFormat = [System.Drawing.Imaging.ImageFormat]::Png
-            if ($extension -eq ".jpg" -or $extension -eq ".jpeg") {
-                $imageFormat = [System.Drawing.Imaging.ImageFormat]::Jpeg
-            }
-
-            $bitmap.Save($saveDialog.FileName, $imageFormat)
-
-            $textFont.Dispose()
-            $graphics.Dispose()
-            $bitmap.Dispose()
-
-            $btnSaveImg.Visible = $false
+        if ($AttestationPass -eq 1) {
+            $statusText  = "Pass"
+            $statusColor = [System.Drawing.Color]::Green
+        } elseif ($AttestationPass -eq 0) {
+            $statusText  = "Fail"
+            $statusColor = [System.Drawing.Color]::Red
+        } else {
+            $statusText  = "UNKNOWN"
+            $statusColor = [System.Drawing.Color]::Yellow
         }
-        $saveDialog.Dispose()
-    })
-    $form.Controls.Add($btnSaveImg)
 
-    $btnCloseClear = New-Object System.Windows.Forms.Button -Property @{
-        Location = New-Object System.Drawing.Point(380, 135)
-        Size     = New-Object System.Drawing.Size(160, 35)
-        Text     = "Close and Clear Clipboard"
-        Font     = New-Object System.Drawing.Font("Segoe UI", 9.5)
+        $form = New-Object System.Windows.Forms.Form -Property @{
+            Text            = "TPM INFO TOOL"
+            Size            = New-Object System.Drawing.Size(570, 320)
+            StartPosition   = "CenterScreen"
+            FormBorderStyle = "FixedSingle"
+            MaximizeBox     = $false
+            BackColor       = [System.Drawing.Color]::White
+            TopMost         = $true
+        }
+
+        $lblTitle = New-Object System.Windows.Forms.Label -Property @{
+            Location = New-Object System.Drawing.Point(30, 30)
+            Size     = New-Object System.Drawing.Size(220, 30)
+            Text     = "OVERALL: TPM Attestation"
+            Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+        }
+        $form.Controls.Add($lblTitle)
+
+        $lblStatus = New-Object System.Windows.Forms.Label -Property @{
+            Location  = New-Object System.Drawing.Point(255, 30)
+            Size      = New-Object System.Drawing.Size(100, 30)
+            Text      = $statusText
+            Font      = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+            ForeColor = $statusColor
+        }
+        $form.Controls.Add($lblStatus)
+
+        $lblNotice = New-Object System.Windows.Forms.Label -Property @{
+            Location  = New-Object System.Drawing.Point(30, 75)
+            Size      = New-Object System.Drawing.Size(490, 45)
+            Text      = "All information has been copied to your clipboard ready to paste into a forum!"
+            Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Italic)
+            ForeColor = [System.Drawing.Color]::DarkSlateGray
+        }
+        $form.Controls.Add($lblNotice)
+
+        $lblResearchId = New-Object System.Windows.Forms.Label -Property @{
+            Location  = New-Object System.Drawing.Point(30, 235)
+            Size      = New-Object System.Drawing.Size(400, 30)
+            Text      = ""
+            Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+            ForeColor = [System.Drawing.Color]::DarkSlateGray
+        }
+        $form.Controls.Add($lblResearchId)
+
+        if ($global:EnableUploadFeature) {
+            $btnUpload = New-Object System.Windows.Forms.Button -Property @{
+                Location = New-Object System.Drawing.Point(30, 130)
+                Size     = New-Object System.Drawing.Size(510, 35)
+                Text     = "Upload Results for Research Purposes"
+                Font     = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+            }
+
+            $btnUpload.Add_Click({
+                try {
+                    $msgResponse = [System.Windows.Forms.MessageBox]::Show(
+                        "Can you play CoD? (No Failed Attestation message)",
+                        "Research Question",
+                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
+
+                    $doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
+
+                    $machineHash = Get-PC-ID
+                    $formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
+                    $lblResearchId.Text = " ID: $formattedId"
+                    $btnUpload.Enabled = $false
+
+                    $bufferText = ($global:ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+
+                    $ms = New-Object System.IO.MemoryStream
+                    $gzip = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
+                    $writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
+                    $writer.Write($bufferText)
+                    $writer.Close()
+                    $gzip.Close()
+                    $compressedData = [Convert]::ToBase64String($ms.ToArray())
+                    $ms.Close()
+
+                    $body = @{
+                        powershell_data = $compressedData
+                        id              = $machineHash
+                        doesCODwork     = $doesCodWork
+                    }
+
+                    $targetUrl = Get-URL
+                    $response = Invoke-RestMethod -Uri $targetUrl -Method Post -Body -TimeoutSec 7 $body -ErrorAction Stop
+                }
+                catch {
+                    if ($null -ne $btnUpload) { $btnUpload.Enabled = $false }
+                }
+            })
+            $form.Controls.Add($btnUpload)
+        }
+
+        $btnClose = New-Object System.Windows.Forms.Button -Property @{
+            Location = New-Object System.Drawing.Point(30, 180)
+            Size     = New-Object System.Drawing.Size(150, 35)
+            Text     = "Close"
+            Font     = New-Object System.Drawing.Font("Segoe UI", 10)
+            TabIndex = 0
+        }
+        $btnClose.Add_Click({
+            try { $form.Close() } catch {}
+        })
+        $form.Controls.Add($btnClose)
+
+        $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
+            Location = New-Object System.Drawing.Point(200, 180)
+            Size     = New-Object System.Drawing.Size(160, 35)
+            Text     = "Save Results to Image"
+            Font     = New-Object System.Drawing.Font("Segoe UI", 10)
+        }
+
+        $btnSaveImg.Add_Click({
+            try {
+                $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
+                    Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
+                    Title    = "Save Tool Text Report"
+                    FileName = "TPM_Attestation_Report.png"
+                }
+
+                if ($saveDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                    $textFont    = New-Object System.Drawing.Font("Courier New", 12)
+                    $bitmapWidth = 1100
+                    $padding     = 20
+
+                    $testBitmap   = New-Object System.Drawing.Bitmap(1, 1)
+                    $testGraphics = [System.Drawing.Graphics]::FromImage($testBitmap)
+
+                    $currentX = $padding
+                    $currentY = $padding
+                    $lineHeight = [Math]::Ceiling($testGraphics.MeasureString("X", $textFont).Height)
+
+                    foreach ($item in $global:ImageBuffer) {
+                        $lines = $item.Text -split "`r`n" -split "`n"
+                        for ($i = 0; $i -lt $lines.Count; $i++) {
+                            $lineText = $lines[$i]
+                            $textSize = $testGraphics.MeasureString($lineText, $textFont)
+
+                            if ($i -gt 0) {
+                                $currentX = $padding
+                                $currentY += $lineHeight
+                            }
+
+                            if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                                $currentX += $textSize.Width
+                            } else {
+                                $currentX = $padding
+                                $currentY += $lineHeight
+                            }
+                        }
+                    }
+                    $bitmapHeight = $currentY + $padding
+
+                    $testGraphics.Dispose()
+                    $testBitmap.Dispose()
+
+                    $bitmap   = New-Object System.Drawing.Bitmap($bitmapWidth, $bitmapHeight)
+                    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+
+                    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+                    $graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                    $graphics.Clear([System.Drawing.Color]::Black)
+
+                    $currentX = $padding
+                    $currentY = $padding
+
+                    foreach ($item in $global:ImageBuffer) {
+                        $drawingColor = $ColorMap[$item.Color]
+                        if ($null -eq $drawingColor) { $drawingColor = [System.Drawing.Color]::White }
+                        $brush = New-Object System.Drawing.SolidBrush($drawingColor)
+
+                        $lines = $item.Text -split "`r`n" -split "`n"
+                        for ($i = 0; $i -lt $lines.Count; $i++) {
+                            $lineText = $lines[$i]
+
+                            if ($i -gt 0) {
+                                $currentX = $padding
+                                $currentY += $lineHeight
+                            }
+
+                            $graphics.DrawString($lineText, $textFont, $brush, $currentX, $currentY)
+                            $textSize = $graphics.MeasureString($lineText, $textFont)
+
+                            if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                                $currentX += ($textSize.Width - ($textFont.Size * 0.4))
+                            } else {
+                                $currentX = $padding
+                                $currentY += $lineHeight
+                            }
+                        }
+                        $brush.Dispose()
+                    }
+
+                    $graphics.Flush()
+
+                    $extension = [System.IO.Path]::GetExtension($saveDialog.FileName).ToLower()
+                    $imageFormat = [System.Drawing.Imaging.ImageFormat]::Png
+                    if ($extension -eq ".jpg" -or $extension -eq ".jpeg") {
+                        $imageFormat = [System.Drawing.Imaging.ImageFormat]::Jpeg
+                    }
+
+                    $bitmap.Save($saveDialog.FileName, $imageFormat)
+
+                    $textFont.Dispose()
+                    $graphics.Dispose()
+                    $bitmap.Dispose()
+
+                    $btnSaveImg.Visible = $false
+                }
+                $saveDialog.Dispose()
+            } catch {}
+        })
+        $form.Controls.Add($btnSaveImg)
+
+        $btnCloseClear = New-Object System.Windows.Forms.Button -Property @{
+            Location = New-Object System.Drawing.Point(380, 180)
+            Size     = New-Object System.Drawing.Size(160, 35)
+            Text     = "Close and Clear Clipboard"
+            Font     = New-Object System.Drawing.Font("Segoe UI", 9.5)
+        }
+        $btnCloseClear.Add_Click({
+            try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
+            try { $form.Close() } catch {}
+        })
+        $form.Controls.Add($btnCloseClear)
+
+        $form.ShowDialog() | Out-Null
     }
-    $btnCloseClear.Add_Click({
-        [System.Windows.Forms.Clipboard]::Clear()
-        $form.Close()
-    })
-    $form.Controls.Add($btnCloseClear)
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
+    catch {
+    }
+    finally {
+        [System.Windows.Forms.Application]::remove_ThreadException($exceptionHandler)
+        if ($null -ne $form) { $form.Dispose() }
+    }
 }
 
 # =========================================================================
