@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.13"
+set "TPM_TOOL_VERSION=1.0.14"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -53,7 +53,7 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
-$global:TotalSteps = 62
+$global:TotalSteps = 63
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -1268,269 +1268,37 @@ function Get-Event1040Details {
     }
 }
 
-# =========================================================================
-# FIX Menu
-# =========================================================================
-
-function Show-FixMenu {
+function Get-EfiBootSignature {
     param (
-        [string]$Message = ""
+        [string]$DriveLetter = "S:"
     )
 
-    Clear-Host
-    Write-Host "             TPM INFO TOOL - FIX MENU         " -ForegroundColor Cyan -BackgroundColor DarkCyan
-    Write-Host "=============================================" -ForegroundColor Cyan
-
-    if (-not [string]::IsNullOrEmpty($Message)) {
-        Write-Host "NOTE: $Message" -ForegroundColor Yellow
-        Write-Host "=============================================" -ForegroundColor Cyan
-    }
-
-    Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
-    Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
-    Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
-	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
-	Write-Host "4) Print PCR Table"                               -ForegroundColor White
-	Write-Host "5) Print DBX Table"                               -ForegroundColor White
-    Write-Host "Q) Quit"                                          -ForegroundColor Red
-    Write-Host "============================================="    -ForegroundColor Cyan
-
-    $choice = Read-Host "Select an option"
-
-    switch ($choice) {
-        "1" {
-            Reset-WindowsCache
-            Show-FixMenu -Message "TPM Cache Reset completed successfully."
-        }
-        "2" {
-            Set-SecureBoot2023Certificates
-        }
-        "3" {
-            Reset-ActivisionKey
-        }
-        "4" {
-            Print-PCRTable
-			pause
-			Show-FixMenu
-        }
-        "5" {
-            Print-DBX | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap
-			pause
-			Show-FixMenu
-        }
-        "Q" {
-			cls
-            exit
-        }
-
-        default {
-            Show-FixMenu -Message "Invalid selection. Please try again."
-        }
-    }
-}
-
-function Reset-WindowsCache{
-	$Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
-	$Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
-	if (Test-Path $Path1) {
-		Remove-Item -Path $Path1 -Recurse -Force
-	}
-	if (Test-Path $Path2) {
-		Remove-Item -Path $Path2 -Recurse -Force
-	}
-	Start-TPM-Maintenance
-	Write-Host "Actioned" -ForegroundColor Green
-}
-
-function Set-SecureBoot2023Certificates {
-    try {
-        $uefiDb = [System.Text.Encoding]::ASCII.GetString((Get-SecureBootUEFI -Name db).Bytes)
-        if ($uefiDb -match 'Windows UEFI CA 2023') {
-            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY installed. No action required."
-            return
-        }
-    } catch {
-        $status = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing" -ErrorAction SilentlyContinue
-        if ($status.UEFICA2023Status -eq "Updated") {
-            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY marked as Updated. No action required."
-            return
-        }
-    }
-
-    Write-Host "WARNING: In rare cases, this may trigger a Secure Boot Violation." -ForegroundColor Yellow
-    Write-Host "Do you wish to continue? (Y/N)" -ForegroundColor Yellow
-
-    $choice = Read-Host "Enter choice"
-
-    if($choice.ToUpper() -eq "Y") {
-
-    }else{
-        Write-Host "Cancelled" -ForegroundColor Yellow
-        return
-    }
-
-    $os = Get-CimInstance Win32_OperatingSystem
-
-    if ($os.Caption -match "Windows 10") {
-        $ubr = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").UBR
-        if ($ubr -lt 4169) {
-            $kbCheck = Get-HotFix -Id "KB5036210" -ErrorAction SilentlyContinue
-            if (-not $kbCheck) {
-                Write-Error "Windows 10 is missing mandatory Secure Boot servicing files. Please run Windows Update first."
-                return
-            }
-        }
-    }
-
-    $blStatus = Get-BitLockerVolume -ErrorAction SilentlyContinue
-    if ($blStatus | Where-Object { $_.VolumeStatus -eq 'Encrypted' -or $_.ProtectionStatus -eq 'On' }) {
-        Write-Warning "Cancelled as BitLocker is ENABLED"
-        return
-    }
-
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot"
-    $bitmask = 0x5944
+    if ($DriveLetter -notmatch ':$') { $DriveLetter += ':' }
+    $bootPath = "$DriveLetter\EFI\Microsoft\Boot\bootmgfw.efi"
 
     try {
-        Set-ItemProperty -Path $regPath -Name "AvailableUpdates" -Value $bitmask -Force -ErrorAction Stop
-        Start-ScheduledTask -TaskPath "\Microsoft\Windows\PI\" -TaskName "Secure-Boot-Update" -ErrorAction Stop
-        Write-Host "Success. Reboot your PC twice consecutively." -ForegroundColor Green
-    } catch {
-        Write-Error "Execution failed to push keys to staging: $_"
-    }
-	pause
-}
+        $null = mountvol $DriveLetter /s
 
-function Reset-ActivisionKey {
-    try {
-        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1
-        $index = [array]::FindIndex($keys, [Predicate[object]]{ $args[0] -match "ActivisionAIK" })
+        if (Test-Path -Path $bootPath) {
+            $issuer = (Get-AuthenticodeSignature -FilePath $bootPath).SignerCertificate.Issuer
 
-        if ($index -ge 0 -and $index -lt ($keys.Count - 1)) {
-            $filePath = $keys[$index + 1].Trim()
-
-            if (Test-Path $filePath) {
-                Rename-Item -Path $filePath -NewName "$($filePath | Split-Path -Leaf).bak" -Force
-                Show-FixMenu -Message "Successfully renamed key file to: $filePath.bak"
-            } else {
-                Show-FixMenu "Key found in certutil, but physical file not found at: $filePath"
+            if ($issuer -like "*2011*") {
+                return "2011"
             }
-        } else {
-            Show-FixMenu "ActivisionAIK key not found."
+            elseif ($issuer -like "*2023*") {
+                return "2023"
+            }
         }
-    } catch {
-       Show-FixMenu "Error: $($_.Exception.Message)"
+        return "Unknown"
+    }
+    catch {
+        return "Unknown"
+    }
+    finally {
+        $null = mountvol $DriveLetter /d
     }
 }
 
-function Print-DBX {
-    $script:dbxData = (Get-SecureBootUEFI -Name dbx -Decoded) | Select-Object `
-        @{N='Authority CN'; E={
-            if ($_.Authority) {
-                $_.Authority -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
-            } elseif ($_.Subject) {
-                $_.Subject -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
-            } else {
-                "N/A (Raw Hash)"
-            }
-        }},
-        @{N='Description'; E={
-            if ($_.Description) { $_.Description }
-            elseif ($_.Company) { $_.Company }
-            else { "N/A" }
-        }},
-        @{N='Hash'; E={
-            if ($_.Hash) { $_.Hash }
-            elseif ($_.Fingerprint) { $_.Fingerprint }
-            else { $_.SerialNumber }
-        }}
-
-    # Return the variable so it still outputs to console if desired
-    return $script:dbxData
-}
-
-# =========================================================================
-# PRINT PIPELINE
-# =========================================================================
-
-function Show-PlatformStatus {
-    $foundPlatforms = @()
-
-    if ($global:platforms.SteamFound) {
-        $foundPlatforms += "Steam"
-    }
-
-    if ($global:platforms.BnetFound) {
-        $foundPlatforms += "BNET"
-    }
-
-    if ($foundPlatforms.Count -gt 0) {
-        # Joins the array elements with '/' (e.g., "Steam/BNET")
-        $platformString = $foundPlatforms -join "/"
-        Log-Output "RESULT: COD $platformString Found"
-    } else {
-        Log-Output "RESULT: Neither COD Steam/BNET detected"
-    }
-}
-
-function Print-PCRTable {
-    Log-Output "`n--- PCR LOGS ---" 'Cyan'
-
-    Get-PCR | ForEach-Object {
-        Log-Output $_
-    }
-    Log-Output ""
-}
-
-function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
-    if ($NoNewLine) {
-        Write-Host $Text -ForegroundColor $Color -NoNewline
-        $global:ClipboardBuffer += $Text
-    } else {
-        Write-Host $Text -ForegroundColor $Color
-        $global:ClipboardBuffer += "$Text`r`n"
-    }
-
-    $global:ImageBuffer.Add([PSCustomObject]@{
-        Text      = $Text
-        Color     = $Color
-        NoNewLine = $NoNewLine
-    })
-}
-
-function Show-PCR_Message() {
-    $HasFailures = $false
-    $FailedRegisters = [System.Collections.Generic.List[string]]::new()
-	$MatchCount = 0
-
-    Get-PCR | ForEach-Object {
-
-        if ($_ -match 'PCR\[(?<num>\d+)\]') {
-            $pcrNum = $Matches['num']
-            $CleanedLine = $_.Trim(" |!`r`n")
-            if ($_ -match 'MISMATCH|Failed|Error') {
-                $HasFailures = $true
-                $FailedRegisters.Add("PCR[$pcrNum]")
-                Log-Output $CleanedLine 'Red'
-            }
-            elseif ($pcrNum -eq '00' -or $pcrNum -eq '0') {
-                Log-Output $CleanedLine 'White'
-            }
-
-			if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
-				$MatchCount++
-			}
-        }
-    }
-
-    if (-not $HasFailures) {
-        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
-		$global:HasPCRFailures = $true
-    } else {
-        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
-        Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
-    }
-}
 
 function Get-PC-ID {
     [CmdletBinding()]
@@ -1849,6 +1617,7 @@ function Show-TcgAttestationAudit ($Data) {
 	}
 
 	Log-Output "DBX: Recent: $($Data.ScoreRecentShims) All: $($Data.ScoreShims)" 'White'
+	Log-Output "Efi Boot: $($Data.EfiBootSignature)" 'White'
 
 	write-host ""
 }
@@ -2297,6 +2066,270 @@ function Get-DbxRevocationScore {
         $MatchCount = ($script:InputHashes | Where-Object { $script:DbxHex -like "*$_*" }).Count
 
         return "$($MatchCount)/$($Hashes.Count)"
+    }
+}
+
+# =========================================================================
+# FIX Menu
+# =========================================================================
+
+function Show-FixMenu {
+    param (
+        [string]$Message = ""
+    )
+
+    Clear-Host
+    Write-Host "             TPM INFO TOOL - FIX MENU         " -ForegroundColor Cyan -BackgroundColor DarkCyan
+    Write-Host "=============================================" -ForegroundColor Cyan
+
+    if (-not [string]::IsNullOrEmpty($Message)) {
+        Write-Host "NOTE: $Message" -ForegroundColor Yellow
+        Write-Host "=============================================" -ForegroundColor Cyan
+    }
+
+    Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
+    Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
+    Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
+	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
+	Write-Host "4) Print PCR Table"                               -ForegroundColor White
+	Write-Host "5) Print DBX Table"                               -ForegroundColor White
+    Write-Host "Q) Quit"                                          -ForegroundColor Red
+    Write-Host "============================================="    -ForegroundColor Cyan
+
+    $choice = Read-Host "Select an option"
+
+    switch ($choice) {
+        "1" {
+            Reset-WindowsCache
+            Show-FixMenu -Message "TPM Cache Reset completed successfully."
+        }
+        "2" {
+            Set-SecureBoot2023Certificates
+        }
+        "3" {
+            Reset-ActivisionKey
+        }
+        "4" {
+            Print-PCRTable
+			pause
+			Show-FixMenu
+        }
+        "5" {
+            Print-DBX | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap
+			pause
+			Show-FixMenu
+        }
+        "Q" {
+			cls
+            exit
+        }
+
+        default {
+            Show-FixMenu -Message "Invalid selection. Please try again."
+        }
+    }
+}
+
+function Reset-WindowsCache{
+	$Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
+	$Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
+	if (Test-Path $Path1) {
+		Remove-Item -Path $Path1 -Recurse -Force
+	}
+	if (Test-Path $Path2) {
+		Remove-Item -Path $Path2 -Recurse -Force
+	}
+	Start-TPM-Maintenance
+	Write-Host "Actioned" -ForegroundColor Green
+}
+
+function Set-SecureBoot2023Certificates {
+    try {
+        $uefiDb = [System.Text.Encoding]::ASCII.GetString((Get-SecureBootUEFI -Name db).Bytes)
+        if ($uefiDb -match 'Windows UEFI CA 2023') {
+            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY installed. No action required."
+            return
+        }
+    } catch {
+        $status = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing" -ErrorAction SilentlyContinue
+        if ($status.UEFICA2023Status -eq "Updated") {
+            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY marked as Updated. No action required."
+            return
+        }
+    }
+
+    Write-Host "WARNING: In rare cases, this may trigger a Secure Boot Violation." -ForegroundColor Yellow
+    Write-Host "Do you wish to continue? (Y/N)" -ForegroundColor Yellow
+
+    $choice = Read-Host "Enter choice"
+
+    if($choice.ToUpper() -eq "Y") {
+
+    }else{
+        Write-Host "Cancelled" -ForegroundColor Yellow
+        return
+    }
+
+    $os = Get-CimInstance Win32_OperatingSystem
+
+    if ($os.Caption -match "Windows 10") {
+        $ubr = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").UBR
+        if ($ubr -lt 4169) {
+            $kbCheck = Get-HotFix -Id "KB5036210" -ErrorAction SilentlyContinue
+            if (-not $kbCheck) {
+                Write-Error "Windows 10 is missing mandatory Secure Boot servicing files. Please run Windows Update first."
+                return
+            }
+        }
+    }
+
+    $blStatus = Get-BitLockerVolume -ErrorAction SilentlyContinue
+    if ($blStatus | Where-Object { $_.VolumeStatus -eq 'Encrypted' -or $_.ProtectionStatus -eq 'On' }) {
+        Write-Warning "Cancelled as BitLocker is ENABLED"
+        return
+    }
+
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot"
+    $bitmask = 0x5944
+
+    try {
+        Set-ItemProperty -Path $regPath -Name "AvailableUpdates" -Value $bitmask -Force -ErrorAction Stop
+        Start-ScheduledTask -TaskPath "\Microsoft\Windows\PI\" -TaskName "Secure-Boot-Update" -ErrorAction Stop
+        Write-Host "Success. Reboot your PC twice consecutively." -ForegroundColor Green
+    } catch {
+        Write-Error "Execution failed to push keys to staging: $_"
+    }
+	pause
+}
+
+function Reset-ActivisionKey {
+    try {
+        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1
+        $index = [array]::FindIndex($keys, [Predicate[object]]{ $args[0] -match "ActivisionAIK" })
+
+        if ($index -ge 0 -and $index -lt ($keys.Count - 1)) {
+            $filePath = $keys[$index + 1].Trim()
+
+            if (Test-Path $filePath) {
+                Rename-Item -Path $filePath -NewName "$($filePath | Split-Path -Leaf).bak" -Force
+                Show-FixMenu -Message "Successfully renamed key file to: $filePath.bak"
+            } else {
+                Show-FixMenu "Key found in certutil, but physical file not found at: $filePath"
+            }
+        } else {
+            Show-FixMenu "ActivisionAIK key not found."
+        }
+    } catch {
+       Show-FixMenu "Error: $($_.Exception.Message)"
+    }
+}
+
+function Print-DBX {
+    $script:dbxData = (Get-SecureBootUEFI -Name dbx -Decoded) | Select-Object `
+        @{N='Authority CN'; E={
+            if ($_.Authority) {
+                $_.Authority -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+            } elseif ($_.Subject) {
+                $_.Subject -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+            } else {
+                "N/A (Raw Hash)"
+            }
+        }},
+        @{N='Description'; E={
+            if ($_.Description) { $_.Description }
+            elseif ($_.Company) { $_.Company }
+            else { "N/A" }
+        }},
+        @{N='Hash'; E={
+            if ($_.Hash) { $_.Hash }
+            elseif ($_.Fingerprint) { $_.Fingerprint }
+            else { $_.SerialNumber }
+        }}
+
+    # Return the variable so it still outputs to console if desired
+    return $script:dbxData
+}
+
+# =========================================================================
+# PRINT PIPELINE
+# =========================================================================
+
+function Show-PlatformStatus {
+    $foundPlatforms = @()
+
+    if ($global:platforms.SteamFound) {
+        $foundPlatforms += "Steam"
+    }
+
+    if ($global:platforms.BnetFound) {
+        $foundPlatforms += "BNET"
+    }
+
+    if ($foundPlatforms.Count -gt 0) {
+        # Joins the array elements with '/' (e.g., "Steam/BNET")
+        $platformString = $foundPlatforms -join "/"
+        Log-Output "RESULT: COD $platformString Found"
+    } else {
+        Log-Output "RESULT: Neither COD Steam/BNET detected"
+    }
+}
+
+function Print-PCRTable {
+    Log-Output "`n--- PCR LOGS ---" 'Cyan'
+
+    Get-PCR | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output ""
+}
+
+function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
+    if ($NoNewLine) {
+        Write-Host $Text -ForegroundColor $Color -NoNewline
+        $global:ClipboardBuffer += $Text
+    } else {
+        Write-Host $Text -ForegroundColor $Color
+        $global:ClipboardBuffer += "$Text`r`n"
+    }
+
+    $global:ImageBuffer.Add([PSCustomObject]@{
+        Text      = $Text
+        Color     = $Color
+        NoNewLine = $NoNewLine
+    })
+}
+
+function Show-PCR_Message() {
+    $HasFailures = $false
+    $FailedRegisters = [System.Collections.Generic.List[string]]::new()
+	$MatchCount = 0
+
+    Get-PCR | ForEach-Object {
+
+        if ($_ -match 'PCR\[(?<num>\d+)\]') {
+            $pcrNum = $Matches['num']
+            $CleanedLine = $_.Trim(" |!`r`n")
+            if ($_ -match 'MISMATCH|Failed|Error') {
+                $HasFailures = $true
+                $FailedRegisters.Add("PCR[$pcrNum]")
+                Log-Output $CleanedLine 'Red'
+            }
+            elseif ($pcrNum -eq '00' -or $pcrNum -eq '0') {
+                Log-Output $CleanedLine 'White'
+            }
+
+			if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
+				$MatchCount++
+			}
+        }
+    }
+
+    if (-not $HasFailures) {
+        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
+		$global:HasPCRFailures = $true
+    } else {
+        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
+        Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
     }
 }
 
@@ -3666,7 +3699,7 @@ function Invoke-MainExecution {
 		LatestUpdatesSummary  = $(Step-Progress; Get-LatestUpdatesSummary)
 		ScoreShims 		      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedShims)
 		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims)
-
+		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
