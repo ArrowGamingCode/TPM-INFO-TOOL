@@ -1279,13 +1279,14 @@ function Get-EfiBootSignature {
         $null = mountvol $DriveLetter /s
 
         if (Test-Path -Path $bootPath) {
-            $issuer = (Get-AuthenticodeSignature -FilePath $bootPath).SignerCertificate.Issuer
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromSignedFile($bootPath)
+            $issuer = $cert.Issuer
 
-            if ($issuer -like "*2011*") {
-                return "2011"
-            }
-            elseif ($issuer -like "*2023*") {
+            if ($issuer -like "*2023*") {
                 return "2023"
+            }
+            elseif ($issuer -like "*2011*") {
+                return "2011"
             }
         }
         return "Unknown"
@@ -1297,7 +1298,6 @@ function Get-EfiBootSignature {
         $null = mountvol $DriveLetter /d
     }
 }
-
 
 function Get-PC-ID {
     [CmdletBinding()]
