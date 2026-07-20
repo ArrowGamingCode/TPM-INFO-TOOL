@@ -72,7 +72,6 @@ function Start-TPM-Maintenance {
 	#Read TPM from nvram.
 	Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
 }
-Start-TPM-Maintenance
 
 function Step-Progress {
     $global:ProgressStep++
