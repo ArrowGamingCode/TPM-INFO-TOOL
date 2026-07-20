@@ -2019,12 +2019,15 @@ function Get-EventId87 {
             StartTime = $OneWeekAgo
         }
 
-        $Events = Get-WinEvent -FilterHashtable $Filter -MaxEvents 2 -ErrorAction Stop
+        $Events = Get-WinEvent -FilterHashtable $Filter -MaxEvents 2 -ErrorAction SilentlyContinue
+
+        if ($null -eq $Events) {
+            return
+        }
 
         foreach ($Event in $Events) {
             if ($Event.Message -match 'Submit\(ChallengeAnswer\):\s*(.*)') {
                 $Answer = $Matches[1].Trim()
-                # Merges the date and string together into a single plain text line
                 "$($Event.TimeCreated) - $Answer"
             }
         }
