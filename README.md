@@ -27,3 +27,7 @@ An experimental tool that displays technical information to help troubleshoot TP
 * **Remediation Steps:** Provides recommended user actions and clear instructions to fix non-compliant settings.
 * **Export Options:** Easily save diagnostic results as an image or copy directly to your clipboard.
 * **And heaps more!**
+  
+## Information
+* Some PCs require a BIOS update, and no tool can change this.
+* For the best results, run the latest BIOS before running the tool.
