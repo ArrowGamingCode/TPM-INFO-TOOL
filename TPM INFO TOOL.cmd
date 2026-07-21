@@ -2901,14 +2901,12 @@ function Show-TpmGuiFormMessage {
             "White"      = [System.Drawing.Color]::White
         }
 
-        # --- Theme Palette ---
         $bgColor       = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
         $cardBgColor   = [System.Drawing.Color]::White
         $textDark      = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
         $darkGreyBtn   = [System.Drawing.ColorTranslator]::FromHtml("#334155")
         $greenCloseBtn = [System.Drawing.ColorTranslator]::FromHtml("#16A34A")
-
-        # Status Styling
+		
         if ($AttestationPass -eq 1) {
             $statusText    = "PASSED"
             $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#DCFCE7")
@@ -2923,7 +2921,6 @@ function Show-TpmGuiFormMessage {
             $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#92400E")
         }
 
-        # Main Form Container
         $form = New-Object System.Windows.Forms.Form -Property @{
             Text            = "TPM Diagnostics Tool"
             Size            = New-Object System.Drawing.Size(620, 370)
@@ -2935,7 +2932,6 @@ function Show-TpmGuiFormMessage {
             TopMost         = $true
         }
 
-        # --- Top Banner (Status Header) ---
         $pnlHeader = New-Object System.Windows.Forms.Panel -Property @{
             Location  = New-Object System.Drawing.Point(0, 0)
             Size      = New-Object System.Drawing.Size(620, 75)
@@ -2964,7 +2960,6 @@ function Show-TpmGuiFormMessage {
         $pnlHeader.Controls.Add($lblStatus)
         $form.Controls.Add($pnlHeader)
 
-        # --- Notice Label (Black and Bigger) ---
         $checkmarkChar = [char]0x2713
         $lblNotice = New-Object System.Windows.Forms.Label -Property @{
             Location  = New-Object System.Drawing.Point(24, 88)
@@ -2975,7 +2970,6 @@ function Show-TpmGuiFormMessage {
         }
         $form.Controls.Add($lblNotice)
 
-        # --- Optional Upload Feature Section ---
         $currentY = 126
         if ($global:EnableUploadFeature) {
             $btnUpload = New-Object System.Windows.Forms.Button -Property @{
@@ -3023,15 +3017,13 @@ function Show-TpmGuiFormMessage {
                         doesCODwork     = $doesCodWork
                     }
 
-                    $targetUrl = Get-URL
-                    $response = Invoke-RestMethod -Uri $targetUrl -Method Post -Body $body -TimeoutSec 7 -ErrorAction SilentlyContinue
+                    $response = Invoke-RestMethod -Uri (Get-URL) -Method Post -Body $body -TimeoutSec 7 -ErrorAction SilentlyContinue
                 } catch {}
             })
             $form.Controls.Add($btnUpload)
             $currentY += 54
         }
 
-        # --- Secondary Utility Buttons (Dark Grey) ---
         $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
             Location  = New-Object System.Drawing.Point(24, $currentY)
             Size      = New-Object System.Drawing.Size(268, 42)
@@ -3164,7 +3156,6 @@ function Show-TpmGuiFormMessage {
 
         $currentY += 52
 
-        # --- Close Button (Green) ---
         $btnClose = New-Object System.Windows.Forms.Button -Property @{
             Location  = New-Object System.Drawing.Point(24, $currentY)
             Size      = New-Object System.Drawing.Size(550, 44)
@@ -3661,7 +3652,7 @@ function Show-UIOutput ($Data) {
 		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
 
         if ($Data.certRaw) {
-            $Data.certRaw -split "`r?`n" | ForEach-Object {
+            $certOut -split "`r?`n" | ForEach-Object {
                 if ($_ -match '^\s*\{\s*"Message"\s*:') {
                     try {
                         $jsonObject = $_ | ConvertFrom-Json
