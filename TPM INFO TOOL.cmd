@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.14"
+set "TPM_TOOL_VERSION=1.0.15"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -62,7 +62,7 @@ $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
 $global:HasPCRFailures = $false
-$global:EnableUploadFeature = $false
+$global:EnableUploadFeature = $true
 
 # =========================================================================
 # FUNCTIONS
@@ -1324,8 +1324,24 @@ function Get-PC-ID {
     }
 }
 
-function Get-URL {
-    return "http://127.0.0.1/INFO_TOOL/"
+function Convert-Rot13 {
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [string]$InputString
+    )
+
+    process {
+        return [regex]::Replace($InputString, '[a-zA-Z]', {
+            param($m)
+            $c = [int]$m.Value[0]
+            $base = if ($c -ge 97) { 97 } else { 65 }
+            return [char]((($c - $base + 13) % 26) + $base)
+        })
+    }
+}
+
+function Get-URL { #Reduce Spam
+    return "https://" + (Convert-Rot13 "neebjtnzvat.qri") + "/INFO_TOOL/"
 }
 
 function Get-Win10SupportStatus {
@@ -2885,88 +2901,113 @@ function Show-TpmGuiFormMessage {
             "White"      = [System.Drawing.Color]::White
         }
 
+        # --- Theme Palette ---
+        $bgColor       = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
+        $cardBgColor   = [System.Drawing.Color]::White
+        $textDark      = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
+        $darkGreyBtn   = [System.Drawing.ColorTranslator]::FromHtml("#334155")
+        $greenCloseBtn = [System.Drawing.ColorTranslator]::FromHtml("#16A34A")
+
+        # Status Styling
         if ($AttestationPass -eq 1) {
-            $statusText  = "Pass"
-            $statusColor = [System.Drawing.Color]::Green
+            $statusText    = "PASSED"
+            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#DCFCE7")
+            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#166534")
         } elseif ($AttestationPass -eq 0) {
-            $statusText  = "Fail"
-            $statusColor = [System.Drawing.Color]::Red
+            $statusText    = "FAILED"
+            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#FEE2E2")
+            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#991B1B")
         } else {
-            $statusText  = "UNKNOWN"
-            $statusColor = [System.Drawing.Color]::Yellow
+            $statusText    = "UNKNOWN"
+            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#FEF3C7")
+            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#92400E")
         }
 
+        # Main Form Container
         $form = New-Object System.Windows.Forms.Form -Property @{
-            Text            = "TPM INFO TOOL"
-            Size            = New-Object System.Drawing.Size(570, 320)
+            Text            = "TPM Diagnostics Tool"
+            Size            = New-Object System.Drawing.Size(620, 370)
             StartPosition   = "CenterScreen"
             FormBorderStyle = "FixedSingle"
             MaximizeBox     = $false
-            BackColor       = [System.Drawing.Color]::White
+            MinimizeBox     = $true
+            BackColor       = $bgColor
             TopMost         = $true
         }
 
-        $lblTitle = New-Object System.Windows.Forms.Label -Property @{
-            Location = New-Object System.Drawing.Point(30, 30)
-            Size     = New-Object System.Drawing.Size(220, 30)
-            Text     = "OVERALL: TPM Attestation"
-            Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+        # --- Top Banner (Status Header) ---
+        $pnlHeader = New-Object System.Windows.Forms.Panel -Property @{
+            Location  = New-Object System.Drawing.Point(0, 0)
+            Size      = New-Object System.Drawing.Size(620, 75)
+            BackColor = $cardBgColor
         }
-        $form.Controls.Add($lblTitle)
+
+        $lblTitle = New-Object System.Windows.Forms.Label -Property @{
+            Location  = New-Object System.Drawing.Point(24, 22)
+            Size      = New-Object System.Drawing.Size(300, 32)
+            Text      = "TPM Attestation Status"
+            Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+            ForeColor = $textDark
+        }
 
         $lblStatus = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(255, 30)
-            Size      = New-Object System.Drawing.Size(100, 30)
+            Location  = New-Object System.Drawing.Point(440, 18)
+            Size      = New-Object System.Drawing.Size(130, 38)
             Text      = $statusText
-            Font      = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-            ForeColor = $statusColor
+            Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+            ForeColor = $statusFg
+            BackColor = $statusBg
+            TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
         }
-        $form.Controls.Add($lblStatus)
 
+        $pnlHeader.Controls.Add($lblTitle)
+        $pnlHeader.Controls.Add($lblStatus)
+        $form.Controls.Add($pnlHeader)
+
+        # --- Notice Label (Black and Bigger) ---
+        $checkmarkChar = [char]0x2713
         $lblNotice = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(30, 75)
-            Size      = New-Object System.Drawing.Size(490, 45)
-            Text      = "All information has been copied to your clipboard ready to paste into a forum!"
-            Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Italic)
-            ForeColor = [System.Drawing.Color]::DarkSlateGray
+            Location  = New-Object System.Drawing.Point(24, 88)
+            Size      = New-Object System.Drawing.Size(560, 28)
+            Text      = "$checkmarkChar Full report copied to clipboard. Ready to paste into support forums."
+            Font      = New-Object System.Drawing.Font("Segoe UI", 11.5, [System.Drawing.FontStyle]::Bold)
+            ForeColor = [System.Drawing.Color]::Black
         }
         $form.Controls.Add($lblNotice)
 
-        $lblResearchId = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(30, 235)
-            Size      = New-Object System.Drawing.Size(400, 30)
-            Text      = ""
-            Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-            ForeColor = [System.Drawing.Color]::DarkSlateGray
-        }
-        $form.Controls.Add($lblResearchId)
-
+        # --- Optional Upload Feature Section ---
+        $currentY = 126
         if ($global:EnableUploadFeature) {
             $btnUpload = New-Object System.Windows.Forms.Button -Property @{
-                Location = New-Object System.Drawing.Point(30, 130)
-                Size     = New-Object System.Drawing.Size(510, 35)
-                Text     = "Upload Results for Research Purposes"
-                Font     = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+                Location  = New-Object System.Drawing.Point(24, $currentY)
+                Size      = New-Object System.Drawing.Size(550, 44)
+                Text      = "Upload Diagnostic Data for Research"
+                Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+                FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+                BackColor = [System.Drawing.ColorTranslator]::FromHtml("#0D6EFD")
+                ForeColor = [System.Drawing.Color]::White
+                Cursor    = [System.Windows.Forms.Cursors]::Hand
             }
+            $btnUpload.FlatAppearance.BorderSize = 0
 
             $btnUpload.Add_Click({
                 try {
                     $msgResponse = [System.Windows.Forms.MessageBox]::Show(
-                        "Can you play CoD? (No Failed Attestation message)",
-                        "Research Question",
+                        "Can you launch/play Call of Duty without attestation errors?",
+                        "Research Verification",
                         [System.Windows.Forms.MessageBoxButtons]::YesNo,
                         [System.Windows.Forms.MessageBoxIcon]::Question
                     )
 
                     $doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
-
                     $machineHash = Get-PC-ID
                     $formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
-                    $lblResearchId.Text = " ID: $formattedId"
-                    $btnUpload.Enabled = $false
+
+                    $btnUpload.Text      = "Code: $formattedId"
+                    $btnUpload.BackColor = [System.Drawing.Color]::Transparent
+                    $btnUpload.Enabled   = $false
 
                     $bufferText = ($global:ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
-
                     $ms = New-Object System.IO.MemoryStream
                     $gzip = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
                     $writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
@@ -2983,39 +3024,30 @@ function Show-TpmGuiFormMessage {
                     }
 
                     $targetUrl = Get-URL
-                    $response = Invoke-RestMethod -Uri $targetUrl -Method Post -Body -TimeoutSec 7 $body -ErrorAction Stop
-                }
-                catch {
-                    if ($null -ne $btnUpload) { $btnUpload.Enabled = $false }
-                }
+                    $response = Invoke-RestMethod -Uri $targetUrl -Method Post -Body $body -TimeoutSec 7 -ErrorAction SilentlyContinue
+                } catch {}
             })
             $form.Controls.Add($btnUpload)
+            $currentY += 54
         }
 
-        $btnClose = New-Object System.Windows.Forms.Button -Property @{
-            Location = New-Object System.Drawing.Point(30, 180)
-            Size     = New-Object System.Drawing.Size(150, 35)
-            Text     = "Close"
-            Font     = New-Object System.Drawing.Font("Segoe UI", 10)
-            TabIndex = 0
-        }
-        $btnClose.Add_Click({
-            try { $form.Close() } catch {}
-        })
-        $form.Controls.Add($btnClose)
-
+        # --- Secondary Utility Buttons (Dark Grey) ---
         $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
-            Location = New-Object System.Drawing.Point(200, 180)
-            Size     = New-Object System.Drawing.Size(160, 35)
-            Text     = "Save Results to Image"
-            Font     = New-Object System.Drawing.Font("Segoe UI", 10)
+            Location  = New-Object System.Drawing.Point(24, $currentY)
+            Size      = New-Object System.Drawing.Size(268, 42)
+            Text      = "Save Report Image"
+            Font      = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
+            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            BackColor = $darkGreyBtn
+            ForeColor = [System.Drawing.Color]::White
         }
+        $btnSaveImg.FlatAppearance.BorderSize = 0
 
         $btnSaveImg.Add_Click({
             try {
                 $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
                     Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
-                    Title    = "Save Tool Text Report"
+                    Title    = "Save Diagnostic Report"
                     FileName = "TPM_Attestation_Report.png"
                 }
 
@@ -3114,16 +3146,41 @@ function Show-TpmGuiFormMessage {
         $form.Controls.Add($btnSaveImg)
 
         $btnCloseClear = New-Object System.Windows.Forms.Button -Property @{
-            Location = New-Object System.Drawing.Point(380, 180)
-            Size     = New-Object System.Drawing.Size(160, 35)
-            Text     = "Close and Clear Clipboard"
-            Font     = New-Object System.Drawing.Font("Segoe UI", 9.5)
+            Location  = New-Object System.Drawing.Point(306, $currentY)
+            Size      = New-Object System.Drawing.Size(268, 42)
+            Text      = "Clear Clipboard and Close"
+            Font      = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
+            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            BackColor = $darkGreyBtn
+            ForeColor = [System.Drawing.Color]::White
         }
+        $btnCloseClear.FlatAppearance.BorderSize = 0
+
         $btnCloseClear.Add_Click({
             try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
             try { $form.Close() } catch {}
         })
         $form.Controls.Add($btnCloseClear)
+
+        $currentY += 52
+
+        # --- Close Button (Green) ---
+        $btnClose = New-Object System.Windows.Forms.Button -Property @{
+            Location  = New-Object System.Drawing.Point(24, $currentY)
+            Size      = New-Object System.Drawing.Size(550, 44)
+            Text      = "Close"
+            Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            BackColor = $greenCloseBtn
+            ForeColor = [System.Drawing.Color]::White
+            TabIndex  = 0
+        }
+        $btnClose.FlatAppearance.BorderSize = 0
+
+        $btnClose.Add_Click({
+            try { $form.Close() } catch {}
+        })
+        $form.Controls.Add($btnClose)
 
         $form.ShowDialog() | Out-Null
     }
