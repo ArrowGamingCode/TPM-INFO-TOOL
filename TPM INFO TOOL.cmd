@@ -1606,7 +1606,7 @@ function Test-SecurityCompliance {
 
     if ($failedChecks.Count -eq 0) {
         return [PSCustomObject]@{
-            message  = "[Pass] Measured Boot Check"
+            message  = "[PASS] Measured Boot Check"
             pass = $true
         }
     } else {
@@ -3526,9 +3526,9 @@ function Show-UIOutput ($Data) {
             $dateDiff = [Math]::Abs(($biosDate - $meDate).TotalDays)
 
             if ($dateDiff -gt 180) {
-                Log-Output "WARNING: BIOS & IME dates are over 6 months apart! ($([Math]::Round($dateDiff)) days difference)" 'Yellow'
+                Log-Output "[WARN] BIOS & IME dates are over 6 months apart! ($([Math]::Round($dateDiff)) days difference)" 'Yellow'
             } else {
-                Log-Output "IME Sync: Passed (Dates are within 6 months)" 'Green'
+                Log-Output "[PASS] IME Sync: (Dates are within 6 months)" 'Green'
             }
         }catch { }
     }
