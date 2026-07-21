@@ -1623,6 +1623,8 @@ function Show-TcgAttestationAudit ($Data) {
 
 	if($Data.ComparedKeyId){
 		Log-Output "[PASS] Key Comp" 'Green'
+	}else{
+		Log-Output "[WARN] Key Comp" 'Yellow'
 	}
 
 	if($Data.MeasuredBootCompliance.pass){
