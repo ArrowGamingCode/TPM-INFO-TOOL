@@ -21,7 +21,7 @@ An experimental tool that displays technical information to help troubleshoot TP
 * **PC Specification Gathering:** Collects details on OS, BIOS, Motherboard etc.
 * **Minimum Requirements Check:** Verifies Secure Boot, Disk Partition style, CPU compatibility, and related hardware settings.
 * **Game-Specific Checks:** Includes tests for (COD) broker, User Account Control (UAC), and other gaming prerequisites.
-* **UEFI 2023 Boot Verification:** Ensures system alignment with UEFI 2023 boot standards.
+* **UEFI 2023 Boot Verification**
 * **Advanced TPM Analysis:** Inspects PCR Banks, DBX Revocation status, and security states.
 * **Attestation Testing:** Supports both Remote and Local Attestation tests.
 * **Remediation Steps:** Provides recommended user actions and clear instructions to fix non-compliant settings.
