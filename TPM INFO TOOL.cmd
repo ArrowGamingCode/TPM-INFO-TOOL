@@ -3291,7 +3291,7 @@ function Show-UserRecommendedSteps ($Data) {
 		Has-Issue
 	}
 
-    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) ) {
+    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) -and $Data.CodBroker.Passed) {
 		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
 		BIOS_TPM_ResetMessage
         Has-Issue
