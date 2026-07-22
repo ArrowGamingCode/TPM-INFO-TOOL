@@ -2159,6 +2159,13 @@ function Reset-WindowsCache{
 	if (Test-Path $Path2) {
 		Remove-Item -Path $Path2 -Recurse -Force
 	}
+
+	certutil -urlcache * delete
+	Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+
 	Start-TPM-Maintenance
 	Write-Host "Actioned" -ForegroundColor Green
 }
