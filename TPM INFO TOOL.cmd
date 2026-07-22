@@ -53,7 +53,7 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
-$global:TotalSteps = 62
+$global:TotalSteps = 63
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -652,6 +652,29 @@ function Get-DiskPartitionStyle {
         return $osDrive.PartitionStyle.ToString()
     } catch {
         return "Unknown / Error"
+    }
+}
+
+function Get-ChipsetDriverVersion {
+    [CmdletBinding()]
+    param()
+
+    $driver = Get-CimInstance Win32_PnPSignedDriver |
+        Where-Object {
+            ($_.Manufacturer -like "*Advanced Micro Devices*" -or $_.Manufacturer -like "*AMD*") -and
+            ($_.DeviceName -like "*SMBus*" -or $_.DeviceName -like "*PCI*")
+        } | Select-Object -First 1
+
+    if (-not $driver) {
+        $driver = Get-CimInstance Win32_PnPSignedDriver |
+            Where-Object {
+                $_.Manufacturer -like "*Intel*" -and
+                ($_.DeviceName -like "*SMBus*" -or $_.DeviceName -like "*Chipset*")
+            } | Select-Object -First 1
+    }
+
+    if ($driver) {
+        return $driver.DriverVersion
     }
 }
 
@@ -3530,6 +3553,7 @@ function Show-UIOutput ($Data) {
 	Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
+	Log-Output "Chipset:      $($Data.ChipsetVersion)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
     if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
@@ -3844,6 +3868,7 @@ function Invoke-MainExecution {
 		CpuInfo               = $(Step-Progress; Get-CpuCompliance)
 		NvidiaDriver          = $(Step-Progress; Get-NvidiaDriverVersion)
 		AmdDriver             = $(Step-Progress; Get-AmdDriverVersion)
+		ChipsetVersion        = $(Step-Progress; Get-ChipsetDriverVersion)
 		RamSlots              = $(Step-Progress; Get-RamDetails)
 		Mobo                  = $(Step-Progress; Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
 		BiosInfo              = $(Step-Progress; Get-BiosCompliance)
