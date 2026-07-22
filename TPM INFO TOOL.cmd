@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.15"
+set "TPM_TOOL_VERSION=1.0.16"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -53,7 +53,7 @@ for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
 )
 goto :eof
 #>
-$global:TotalSteps = 63
+$global:TotalSteps = 62
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -1621,12 +1621,6 @@ function Show-TcgAttestationAudit ($Data) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
 	Show-PCR_Message
 
-	if($Data.ComparedKeyId){
-		Log-Output "[PASS] Key Comp" 'Green'
-	}else{
-		Log-Output "[WARN] Key Comp" 'Yellow'
-	}
-
 	if($Data.MeasuredBootCompliance.pass){
 		Log-Output $Data.MeasuredBootCompliance.message 'Green'
 	}else{
@@ -1634,9 +1628,142 @@ function Show-TcgAttestationAudit ($Data) {
 	}
 
 	Log-Output "DBX: Recent: $($Data.ScoreRecentShims) All: $($Data.ScoreShims)" 'White'
-	Log-Output "Efi Boot: $($Data.EfiBootSignature)" 'White'
+}
 
-	write-host ""
+function Get-TpmEkChainInfo {
+    [CmdletBinding()]
+    param (
+        [bool]$Privacy = $false,
+        [string]$Key
+    )
+
+    $ekInfo = Get-TpmEndorsementKeyInfo
+
+    if (-not $ekInfo) {
+        Write-Error "Fail: No TPM Endorsement Key info found."
+        return
+    }
+
+    $searchKey = if ($Key) { $Key -replace "[\s-]", "" } else { $null }
+
+    $leafCerts = [System.Collections.Generic.List[System.Security.Cryptography.X509Certificates.X509Certificate2]]::new()
+    $allSourceCerts = @($ekInfo.ManufacturerCertificates) + @($ekInfo.AdditionalCertificates)
+
+    foreach ($cert in $allSourceCerts) {
+        if ($cert) {
+            $alreadyAdded = $leafCerts.Where({ $_.Thumbprint -eq $cert.Thumbprint }, 'First').Count -gt 0
+            if (-not $alreadyAdded) {
+                $leafCerts.Add($cert)
+            }
+        }
+    }
+
+    if ($leafCerts.Count -eq 0) {
+        Write-Error "Fail: No certificates found."
+        return
+    }
+
+    $allChainResults = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $keyFound = $false
+    $foundRole = "None"
+
+    $certIndex = 1
+    foreach ($leafCert in $leafCerts) {
+        $chainEngine = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+        $chainEngine.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        $chainEngine.ChainPolicy.UrlRetrievalTimeout = [System.TimeSpan]::Zero # Block network calls
+
+        $null = $chainEngine.Build($leafCert)
+
+        $elementCount = $chainEngine.ChainElements.Count
+
+        for ($i = 0; $i -lt $elementCount; $i++) {
+            $cert = $chainEngine.ChainElements[$i].Certificate
+
+            $isSelfSigned = ($cert.Subject -eq $cert.Issuer)
+            $role = if ($isSelfSigned) { "Root CA" } elseif ($i -eq 0) { "Leaf EK" } else { "Intermediate CA" }
+
+            $skiExt = $cert.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.14" }
+            $rawSki = if ($skiExt) { ($skiExt.Format($false) -replace "[\s-:]", "") } else { "None" }
+
+            $akiExt = $cert.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.35" }
+            $rawAki = "None"
+            if ($akiExt) {
+                $formattedAki = $akiExt.Format($false)
+                if ($formattedAki -match "KeyId=([a-fA-F0-9\s:-]+)") {
+                    $rawAki = $matches[1] -replace "[\s-:]", ""
+                } else {
+                    $rawAki = $formattedAki -replace "[\s-:]", ""
+                }
+            }
+
+            $isKeyMatch = if ($searchKey) {
+                ($cert.Thumbprint -eq $searchKey) -or
+                ($rawSki -eq $searchKey) -or
+                ($rawAki -eq $searchKey)
+            } else {
+                $false
+            }
+
+            if ($isKeyMatch) {
+                $keyFound = $true
+                $foundRole = $role
+            }
+
+            $skiDisplay = if ($Privacy -and $rawSki -ne "None" -and $rawSki.Length -ge 4) { $rawSki.Substring(0, 4) } else { $rawSki }
+            $akiDisplay = if ($Privacy -and $rawAki -ne "None" -and $rawAki.Length -ge 4) { $rawAki.Substring(0, 4) } else { $rawAki }
+
+            $aiaUrl = $null
+            if (-not $isSelfSigned) {
+                $aiaExt = $cert.Extensions | Where-Object {
+                    $_.Oid.Value -eq "1.3.6.1.5.5.7.1.1" -or $_.Oid.FriendlyName -eq "Authority Information Access"
+                }
+
+                if ($aiaExt) {
+                    $formattedText = $aiaExt.Format($true)
+                    $urls = [regex]::Matches($formattedText, 'https?://[^\s\r\n\t"''<>]+') |
+                        ForEach-Object { $_.Value } |
+                        Where-Object { $_ -ne "http://ftpm.amd.com/pki/ocsp" }
+
+                    if ($urls) {
+                        $aiaUrl = $urls -join " | "
+                    }
+                }
+            }
+
+            $pathCNs = foreach ($elem in $chainEngine.ChainElements[0..$i]) {
+                $subjectVal = if ($elem.Certificate.Subject -match 'CN=([^,]+)') {
+                    $matches[1].Split(',')[0].Trim()
+                } else {
+                    $elem.Certificate.Subject.Split(',')[0].Trim()
+                }
+                $subjectVal -replace "TPMVersion=", ""
+            }
+            [array]::Reverse($pathCNs)
+            $certPathString = $pathCNs -join "->"
+
+            $certProps = [ordered]@{
+                Role     = "$role : $certPathString"
+                Subject  = $cert.Subject.Split(',')[0].Trim()
+                SKI      = $skiDisplay
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($aiaUrl)) {
+                $certProps["AIA"] = $aiaUrl
+            }
+
+            $allChainResults.Add([PSCustomObject]$certProps)
+        }
+
+        $certIndex++
+    }
+
+    return [PSCustomObject]@{
+        KeyFound     = $keyFound
+        MatchingRole = $foundRole
+        ChainDetails = $allChainResults
+		IsIntermediate = ($foundRole -eq "Intermediate CA")
+    }
 }
 
 function Test-CompatibilityFlag {
@@ -1851,14 +1978,19 @@ function Get-CertreqAttestation($Data) {
 
 	#$OverallPassResult = 2;
 
-    return [PSCustomObject]@{
-        CertRaw       = $certRaw
-        OverallPassResult = $OverallPassResult
-		IsOverallAIKPass = $IsOverallAIKPass;
+	$keyID = $false
+	if ($certRaw -match 'KeyId[-=:]\s*(?<id>[A-Fa-f0-9]{32,})') {
+		$keyID = $Matches['id']
+	}
 
-		EnrollSuccess = $enrollSuccess
+    return [PSCustomObject]@{
+        CertRaw               = $certRaw
+        OverallPassResult     = $OverallPassResult
+		IsOverallAIKPass      = $IsOverallAIKPass;
+		EnrollSuccess         = $enrollSuccess
 		NameResolutionFailure = $nameResolutionFailure
-		FailureMessage = $failureMessage
+		FailureMessage        = $failureMessage
+		KeyID                 = $keyID
     }
 }
 
@@ -1914,18 +2046,6 @@ function Compare-TpmKeyId {
 
     if ($certKeyId -eq $tpmKeyId) {
         return $true
-    }
-
-    return $false
-}
-
-function Get-LiveTpmKeyId {
-    $certData = certutil -silent -v -tpmInfo 2>$null | Out-String
-
-    $pattern = 'KeyID\s*=\s*(?<id>[A-Fa-f0-9]{6,})'
-
-    if ($certData -match $pattern) {
-        return $Matches['id']
     }
 
     return $false
@@ -3502,12 +3622,6 @@ function Show-UIOutput ($Data) {
 		Log-Output "[INFO] No CA 2023: $($Data.MicrosoftCA.OverallState)"
 	}
 
-	if (!$Data.GetEvent1040Details.Found){
-		Log-Output "[PASS] Event 1040" 'Green'
-	}else{
-		Log-Output "[INFO] Event 1040 $($Data.GetEvent1040Details.Filename)"
-	}
-
 	if ($Data.Sha256 -eq $false) {
 		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
 	}
@@ -3575,14 +3689,21 @@ function Show-UIOutput ($Data) {
 	$Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
 		Log-Output $_
 	}
+	Log-Output "Efi Boot: $($Data.EfiBootSignature)" 'White'
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
     Log-Output $certOut 'Green'
 
-	Log-Output "Old Events" 'Cyan'
+	Log-Output "--- Events ---" 'Cyan'
 	$Data.EventId87 | ForEach-Object {
 		Log-Output $_
+	}
+
+	if (!$Data.GetEvent1040Details.Found){
+		Log-Output "[PASS] Event 1040" 'Green'
+	}else{
+		Log-Output "[INFO] Event 1040 $($Data.GetEvent1040Details.Filename)"
 	}
 
 	if ($Data.IsOverallAIKPass) {
@@ -3644,6 +3765,22 @@ function Show-UIOutput ($Data) {
 	#Print-PCRTable
 
 	Show-TcgAttestationAudit -Data $Data
+
+    Log-Output "`n---- TRUST ---" 'Cyan'
+	if($Data.TPMChainInfo.KeyFound -and $Data.TPMChainInfo.IsIntermediate){
+		Log-Output "[PASS] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Green'
+	}else{
+		Log-Output "[WARN] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Yellow'
+	}
+
+	foreach ($item in $Data.TPMChainInfo.ChainDetails) {
+		foreach ($prop in $item.PSObject.Properties) {
+			$line = "{0,-8}: {1}" -f $prop.Name, $prop.Value
+			Log-Output $line 'White'
+		}
+
+		Log-Output "" 'White'
+	}
 
     Show-Banner -OverallPassResult $Data.OverallPassResult
 
@@ -3749,7 +3886,6 @@ function Invoke-MainExecution {
 		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
 		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
 		UACLevel              = $(Step-Progress; Get-UacStatus)
-		LiveTpmKeyId          = $(Step-Progress; Get-LiveTpmKeyId)
 		Sha256                = $(Step-Progress; Test-TPMSha256Support)
 		TestMSI               = $(Step-Progress; Test-MSI)
 		AgesaVersion          = $(Step-Progress; Get-AgesaVersion)
@@ -3762,7 +3898,7 @@ function Invoke-MainExecution {
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
 	$Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.CertRaw) -or (Is-Pluton)
-	$ComparedKeyId      = Compare-TpmKeyId -certData $CertreqAttestation.CertRaw -tpmKeyId $systemData.LiveTpmKeyId
+	$TpmEkChainInfo     = Get-TpmEkChainInfo -Privacy $true -Key $CertreqAttestation.KeyID
 
 	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
 	$systemData | Add-Member -NotePropertyName "OverallPassResult" -NotePropertyValue $CertreqAttestation.OverallPassResult
@@ -3770,9 +3906,8 @@ function Invoke-MainExecution {
 	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
 	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
 	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
-
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
-	$systemData | Add-Member -NotePropertyName "ComparedKeyId" -NotePropertyValue $ComparedKeyId
+	$systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
 
     Show-UIOutput -Data $systemData
 	return $systemData
