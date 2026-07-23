@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 63
+$global:TotalSteps = 64
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -657,9 +657,25 @@ function Get-DiskPartitionStyle {
         if (-not $osDrive) {
             $osDrive = Get-Disk | Select-Object -First 1
         }
-        return $osDrive.PartitionStyle.ToString()
+
+        if (-not $osDrive) {
+            return [PSCustomObject]@{
+                Success = $false
+                Type    = "NotFound"
+            }
+        }
+
+        $style = $osDrive.PartitionStyle.ToString()
+
+        return [PSCustomObject]@{
+            Success = ($style -eq "GPT")
+            Type    = $style
+        }
     } catch {
-        return "Unknown / Error"
+        return [PSCustomObject]@{
+            Success = $false
+            Type    = "Error"
+        }
     }
 }
 
@@ -2240,6 +2256,63 @@ function Get-DbxRevocationScore {
     }
 }
 
+function Test-MotherboardSwap {
+    $os = Get-CimInstance Win32_OperatingSystem
+    $winInstallDate = $os.InstallDate
+    $board = Get-CimInstance Win32_BaseBoard
+    $bios = Get-CimInstance Win32_BIOS
+
+    if ($winInstallDate -gt (Get-Date).AddDays(-50)) {
+        return "None"
+    }
+
+    $chipsetDrivers = Get-WindowsDriver -Online | Where-Object {
+        ($_.OriginalFileName -like "*pci*" -or $_.OriginalFileName -like "*chipset*" -or $_.OriginalFileName -like "*smbus*") -and
+        $_.ProviderName -ne "Microsoft"
+    }
+
+    $newerDriversFound = $false
+    foreach ($driver in $chipsetDrivers) {
+        if ($driver.Date -and [datetime]$driver.Date -gt $winInstallDate) {
+            $newerDriversFound = $true
+            break
+        }
+    }
+
+    $ghostDevices = Get-CimInstance Win32_PnPEntity | Where-Object {
+        $_.ConfigManagerErrorCode -eq 45 -and ($_.PNPClass -eq "System" -or $_.PNPClass -eq "Processor")
+    }
+
+    $biosPostDatesInstall = $false
+    if ($bios.ReleaseDate -and [datetime]$bios.ReleaseDate -gt $winInstallDate) {
+        $biosPostDatesInstall = $true
+    }
+
+    $score = 0
+
+    if ($ghostDevices.Count -gt 0) {
+        $score += 2
+    }
+
+    if ($newerDriversFound) {
+        $score += 1
+    }
+
+    if ($biosPostDatesInstall) {
+        $score += 1
+    }
+
+    if ($score -ge 2) {
+        return "Yes"
+    }
+    elseif ($score -eq 1) {
+        return "Likely"
+    }
+    else {
+        return "No"
+    }
+}
+
 # =========================================================================
 # FIX Menu
 # =========================================================================
@@ -3563,6 +3636,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
 	Log-Output "Chipset:      $($Data.ChipsetVersion)"
+	Log-Output "Hardware Swap:$($Data.MotherboardSwap)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
     if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
@@ -3665,9 +3739,14 @@ function Show-UIOutput ($Data) {
 		Log-Output "[FAIL] Activision Key $($Data.ActivisionKey.Message)" 'Red'
 	}
 
+	if ($Data.PartitionStyle.Success) {
+		Log-Output "[PASS] Disk: $($Data.PartitionStyle.Type)" 'Green'
+	}else{
+		Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
+	}
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery: $($Data.BatteryInfo.Text)"
-    Log-Output "Partition: $($Data.PartitionStyle)"
 
     Show-PlatformStatus
 
@@ -3933,6 +4012,7 @@ function Invoke-MainExecution {
 		ScoreShims 		      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedShims)
 		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims)
 		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
+		MotherboardSwap       = $(Step-Progress; Test-MotherboardSwap)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
