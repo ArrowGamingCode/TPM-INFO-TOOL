@@ -459,12 +459,21 @@ function Get-ActivisionKeyStatus {
     try {
         $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1 | Out-String
         if ($keys -match "ActivisionAIK") {
-            return "Found"
+            return [PSCustomObject]@{
+                Success = $true
+                Message = "Found"
+            }
         } else {
-            return "Not Found"
+            return [PSCustomObject]@{
+                Success = $false
+                Message = "Not Found"
+            }
         }
     } catch {
-        return "Error checking Key CSP Container"
+        return [PSCustomObject]@{
+            Success = $false
+            Message = "Error checking Key CSP Container"
+        }
     }
 }
 
@@ -3650,10 +3659,15 @@ function Show-UIOutput ($Data) {
 		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
 	}
 
+	if ($Data.ActivisionKey.Success) {
+		Log-Output "[PASS] Activision Key $($Data.ActivisionKey.Message)" 'Green'
+	}else{
+		Log-Output "[FAIL] Activision Key $($Data.ActivisionKey.Message)" 'Red'
+	}
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery: $($Data.BatteryInfo.Text)"
     Log-Output "Partition: $($Data.PartitionStyle)"
-	Log-Output "Activision Key: $($Data.ActivisionKey)"
 
     Show-PlatformStatus
 
