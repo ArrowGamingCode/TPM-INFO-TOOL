@@ -31,3 +31,7 @@ An experimental tool that displays technical information to help troubleshoot TP
 ## Information
 * Some PCs require a BIOS update, and no tool can change this.
 * For the best results, run the latest BIOS before running the tool.
+
+## 📷 Preview 2
+
+![Screenshot](example2.jpg)
