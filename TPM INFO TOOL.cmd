@@ -2498,7 +2498,8 @@ function Show-PCR_Message() {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
 		$global:HasPCRFailures = $true
     } else {
-        Log-Output "[WARN] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'DarkYellow'
+        Log-Output "[FAIL] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'Red'
+		Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
     }
 }
