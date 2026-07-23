@@ -27,8 +27,8 @@ for /f "tokens=4" %%G in ('chcp') do set "ORIGINAL_CP=%%G"
 chcp 437 >nul
 set "TpmDeviceData="
 set "TpmToolType="
-call :CollapseCommandOutput TpmDeviceData "tpmtool getdeviceinformation"
-call :CollapseCommandOutput TpmToolType "tpmtool /?"
+call :CollapseCommandOutput TpmDeviceData "powershell -NoProfile -Command [System.Threading.Thread]::CurrentThread.CurrentUICulture='en-US'; tpmtool getdeviceinformation"
+call :CollapseCommandOutput TpmToolType "powershell -NoProfile -Command [System.Threading.Thread]::CurrentThread.CurrentUICulture='en-US'; tpmtool /?"
 chcp %ORIGINAL_CP% >nul
 
 echo Stage 1 done.
@@ -37,20 +37,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0'
 exit /b
 
 :CollapseCommandOutput
-set "varName=%~1"
+set "targetVar=%~1"
 set "command=%~2"
-set "%varName%="
+set "result="
 
-for /f "usebackq tokens=* delims=" %%A in (`%command% 2^>nul`) do (
-    if "!%varName%!"=="" (
-        set "%varName%=%%A"
+for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
+    if not defined result (
+        set "result=%%A"
     ) else (
-        for /f "delims=" %%B in ("!varName!") do (
-            set "current_val=!%%B!"
-            set "%%B=!current_val! | %%A"
-        )
+        set "result=!result! | %%A"
     )
 )
+
+endlocal & set "%~1=%result%"
 goto :eof
 #>
 $global:TotalSteps = 63
