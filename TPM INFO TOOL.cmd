@@ -1055,38 +1055,45 @@ function Get-BitLockerStatus {
 }
 
 function Get-IntelMeVersion {
+    $result = [PSCustomObject]@{
+        DriverVersion   = "NA"
+        DriverDate      = "NA"
+        RawDriverDate   = $null
+        FirmwareVersion = "NA"
+    }
+
     try {
-        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Intel%Management Engine%'" |
+        $meDriver = Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Intel%Management Engine%'" -ErrorAction SilentlyContinue |
             Select-Object -First 1
 
         if ($meDriver -and $meDriver.DriverVersion) {
+            $result.DriverVersion = $meDriver.DriverVersion
             if ($meDriver.DriverDate) {
-                return [PSCustomObject]@{
-                    Version = $meDriver.DriverVersion
-                    Date    = $meDriver.DriverDate.ToString("yyyy-MM-dd")
-                    RawDate = [datetime]$meDriver.DriverDate
-                }
+                $result.DriverDate    = $meDriver.DriverDate.ToString("yyyy-MM-dd")
+                $result.RawDriverDate = [datetime]$meDriver.DriverDate
             } else {
-                return [PSCustomObject]@{
-                    Version = $meDriver.DriverVersion
-                    Date    = "Unknown"
-                    RawDate = $null
-                }
-            }
-        } else {
-            return [PSCustomObject]@{
-                Version = "Not Found"
-                Date    = "N/A"
-                RawDate = $null
+                $result.DriverDate    = "Unknown"
             }
         }
     } catch {
-        return [PSCustomObject]@{
-            Version = "Error Querying Driver"
-            Date    = "Error"
-            RawDate = $null
-        }
+        $result.DriverVersion = "Error"
+        $result.DriverDate    = "Error"
     }
+
+    try {
+        $meSystem = Get-CimInstance -Namespace "root\intel_me" -ClassName "ME_System" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($meSystem -and $meSystem.FWVersion) {
+            $result.FirmwareVersion = $meSystem.FWVersion
+        } else {
+            $result.FirmwareVersion = "NA"
+        }
+    } catch {
+        $result.FirmwareVersion = "Error"
+    }
+
+    return $result
 }
 
 function Get-NvidiaDriverVersion {
@@ -3755,7 +3762,7 @@ function Show-UIOutput ($Data) {
 		Log-Output "RESULT: Core Isolation Off"
 	}
 
-	Log-Output "IME Version: $($Data.IntelMeVersion.Version) - IME Date: $($Data.IntelMeVersion.Date)"
+	Log-Output "IME Driver Ver: $($Data.IntelMeVersion.DriverVersion) - Firmware Ver: $($Data.IntelMeVersion.FirmwareVersion) - Date: $($Data.IntelMeVersion.DriverDate)"
 
     $biosObj = Get-CimInstance -ClassName Win32_Bios
     if ($biosObj -and $biosObj.ReleaseDate -and $Data.IntelMeVersion.RawDate) {
