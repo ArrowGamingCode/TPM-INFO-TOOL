@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.16"
+set "TPM_TOOL_VERSION=1.0.17"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -1685,6 +1685,90 @@ function Show-TcgAttestationAudit ($Data) {
 	Log-Output "DBX: Recent: $($Data.ScoreRecentShims) All: $($Data.ScoreShims)" 'White'
 }
 
+function Test-ODCA {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [string]$Key
+    )
+
+    $cleanKey = ($Key -replace '[\s:-]', '').ToUpper()
+
+    $regPaths = @(
+        "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\IntermediateCACertStore\Certificates",
+        "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\EKCertStore\Certificates"
+    )
+
+    $foundCerts = [System.Collections.Generic.List[System.Security.Cryptography.X509Certificates.X509Certificate2]]::new()
+
+    foreach ($path in $regPaths) {
+        if (Test-Path $path) {
+            Get-ChildItem -Path $path -ErrorAction SilentlyContinue | ForEach-Object {
+                $bytes = (Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue).Blob
+                if ($bytes) {
+                    try { $foundCerts.Add([System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$bytes)) } catch {}
+                }
+            }
+        }
+    }
+
+    if ($foundCerts.Count -eq 0) {
+        return $null
+    }
+
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($cert in $foundCerts) {
+        $skiExt = $cert.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.14" }
+        $ski = if ($skiExt) {
+            try { [System.Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($skiExt, $false).SubjectKeyIdentifier.ToUpper() } catch { $null }
+        } else { $null }
+
+        $akiExt = $cert.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.35" }
+        $aki = if ($akiExt) {
+            if ($akiExt.GetType().Name -eq "X509AuthorityKeyIdentifierExtension" -and $akiExt.KeyIdentifier) {
+                ([System.BitConverter]::ToString($akiExt.KeyIdentifier.ToArray()) -replace "-").ToUpper()
+            } else {
+                $raw = $akiExt.RawData
+                $found = $null
+                for ($i = 0; $i -lt ($raw.Length - 1); $i++) {
+                    if ($raw[$i] -eq 0x80 -and ($i + 2 + [int]$raw[$i + 1]) -le $raw.Length) {
+                        $found = ([System.BitConverter]::ToString($raw, $i + 2, [int]$raw[$i + 1]) -replace "-").ToUpper()
+                        break
+                    }
+                }
+                $found
+            }
+        } else { $null }
+
+        $isCA = $false
+        $bcExt = $cert.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.19" }
+        if ($bcExt) {
+            try { $isCA = [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($bcExt, $false).CertificateAuthority } catch {}
+        }
+
+        $role = if ($cert.Subject -eq $cert.Issuer -and $isCA) { "Root CA" } elseif ($isCA) { "Intermediate CA" } else { "Endorsement Key (Leaf)" }
+
+        $thumbprint = $cert.Thumbprint.ToUpper()
+        $isMatch = (($ski -eq $cleanKey) -or ($aki -eq $cleanKey) -or ($thumbprint -eq $cleanKey))
+
+        $subjectVal = if ([string]::IsNullOrWhiteSpace($cert.Subject)) { "None" } else { $cert.Subject }
+        $skiVal     = if ([string]::IsNullOrWhiteSpace($ski) -or $ski -eq "None") { "None" } elseif ($ski.Length -ge 4) { $ski.Substring(0, 4) } else { $ski }
+        $akiVal     = if ([string]::IsNullOrWhiteSpace($aki) -or $aki -eq "None") { "None" } elseif ($aki.Length -ge 4) { $aki.Substring(0, 4) } else { $aki }
+
+        $results.Add([PSCustomObject]@{
+            Role       = "$role (Registry)"
+            Subject    = $subjectVal.Split(',')[0].Trim()
+            SKI        = $skiVal
+            AKI        = $akiVal
+            IsMatch    = $isMatch
+            FoundRole  = $role
+        })
+    }
+
+    return $results
+}
+
 function Get-TpmEkChainInfo {
     [CmdletBinding()]
     param (
@@ -1695,7 +1779,6 @@ function Get-TpmEkChainInfo {
     $ekInfo = Get-TpmEndorsementKeyInfo
 
     if (-not $ekInfo) {
-        Write-Error "Fail: No TPM Endorsement Key info found."
         return
     }
 
@@ -1714,7 +1797,6 @@ function Get-TpmEkChainInfo {
     }
 
     if ($leafCerts.Count -eq 0) {
-        Write-Error "Fail: No certificates found."
         return
     }
 
@@ -1722,11 +1804,10 @@ function Get-TpmEkChainInfo {
     $keyFound = $false
     $foundRole = "None"
 
-    $certIndex = 1
     foreach ($leafCert in $leafCerts) {
         $chainEngine = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
         $chainEngine.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-        $chainEngine.ChainPolicy.UrlRetrievalTimeout = [System.TimeSpan]::Zero # Block network calls
+        $chainEngine.ChainPolicy.UrlRetrievalTimeout = [System.TimeSpan]::Zero
 
         $null = $chainEngine.Build($leafCert)
 
@@ -1775,8 +1856,7 @@ function Get-TpmEkChainInfo {
                 }
 
                 if ($aiaExt) {
-                    $formattedText = $aiaExt.Format($true)
-                    $urls = [regex]::Matches($formattedText, 'https?://[^\s\r\n\t"''<>]+') |
+                    $urls = [regex]::Matches($aiaExt.Format($true), 'https?://[^\s\r\n\t"''<>]+') |
                         ForEach-Object { $_.Value } |
                         Where-Object { $_ -ne "http://ftpm.amd.com/pki/ocsp" }
 
@@ -1798,10 +1878,10 @@ function Get-TpmEkChainInfo {
             $certPathString = $pathCNs -join "->"
 
             $certProps = [ordered]@{
-                Role     = "$role : $certPathString"
-                Subject  = $cert.Subject.Split(',')[0].Trim()
-                SKI      = $skiDisplay
-				AKI      = $akiDisplay
+                Role    = "$role : $certPathString"
+                Subject = $cert.Subject.Split(',')[0].Trim()
+                SKI     = $skiDisplay
+                AKI     = $akiDisplay
             }
 
             if (-not [string]::IsNullOrWhiteSpace($aiaUrl)) {
@@ -1810,15 +1890,37 @@ function Get-TpmEkChainInfo {
 
             $allChainResults.Add([PSCustomObject]$certProps)
         }
+    }
 
-        $certIndex++
+    $isIntermediate = ($foundRole -eq "Intermediate CA")
+
+    if (-not $isIntermediate -and $searchKey) {
+        $regResults = Test-ODCA -Key $searchKey
+        if ($regResults) {
+            foreach ($regItem in $regResults) {
+                $allChainResults.Add([PSCustomObject]@{
+                    Role    = $regItem.Role
+                    Subject = $regItem.Subject
+                    SKI     = $regItem.SKI
+                    AKI     = $regItem.AKI
+                })
+
+                if ($regItem.IsMatch) {
+                    $keyFound = $true
+                    $foundRole = "$($regItem.FoundRole) (Registry)"
+                    if ($regItem.FoundRole -eq "Intermediate CA") {
+                        $isIntermediate = $true
+                    }
+                }
+            }
+        }
     }
 
     return [PSCustomObject]@{
-        KeyFound     = $keyFound
-        MatchingRole = $foundRole
-        ChainDetails = $allChainResults
-		IsIntermediate = ($foundRole -eq "Intermediate CA")
+        KeyFound       = $keyFound
+        MatchingRole   = $foundRole
+        ChainDetails   = $allChainResults
+        IsIntermediate = $isIntermediate
     }
 }
 
@@ -4005,8 +4107,6 @@ function Show-UIOutput ($Data) {
     Log-Output "`n---- TRUST ---" 'Cyan'
 	if($Data.TPMChainInfo.KeyFound -and $Data.TPMChainInfo.IsIntermediate){
 		Log-Output "[PASS] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Green'
-	}else{
-		Log-Output "[WARN] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Yellow'
 	}
 
 	foreach ($item in $Data.TPMChainInfo.ChainDetails) {
