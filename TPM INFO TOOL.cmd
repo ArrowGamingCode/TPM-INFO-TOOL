@@ -52,12 +52,13 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 64
+$global:TotalSteps = 65
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
 $global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
+$global:DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
 $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
 $global:HasPCRFailures = $false
@@ -2320,6 +2321,113 @@ function Test-MotherboardSwap {
     }
 }
 
+function Log-Data ($Data) {
+    if ($Data) {
+        $cleanedLines = ($Data | Out-String) -split "`r?\n" |
+            ForEach-Object { $_.TrimEnd() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        foreach ($line in $cleanedLines) {
+            $global:DataBuffer.Add([PSCustomObject]@{
+                Text = $line
+            })
+        }
+    }
+}
+
+function Get-TpmCertificateDetails {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, Position = 0)]
+        [string]$RegistryPath
+    )
+
+    process {
+        if (-not (Test-Path $RegistryPath)) {
+            return
+        }
+
+        $rawBlob = (Get-ItemProperty -Path $RegistryPath -ErrorAction SilentlyContinue).Blob
+
+        if (-not $rawBlob) {
+            return
+        }
+
+        try {
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(,$rawBlob)
+        } catch {
+            return
+        }
+
+        $allExtObjects = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        foreach ($ext in $cert.Extensions) {
+            $friendlyName = if ($ext.Oid.FriendlyName) { $ext.Oid.FriendlyName } else { "Custom / TCG OID" }
+            $rawFormatted = $ext.Format($true)
+
+            $extProps = [ordered]@{
+                "Friendly Name" = $friendlyName
+                "OID"           = $ext.Oid.Value
+                "Critical"      = $ext.Critical
+            }
+
+            if ($ext.Oid.Value -eq "2.5.29.17") {
+                $rawFormatted -split "`r?\n" | ForEach-Object {
+                    if ($_ -match "^\s*(.+?)=(.+)$") {
+                        $extProps[$matches[1].Trim()] = $matches[2].Trim()
+                    }
+                }
+            }
+            elseif ($ext.Oid.Value -eq "2.5.29.32") {
+                $policyId = if ($rawFormatted -match "Policy Identifier=([^\r\n]+)") { $matches[1].Trim() } else { "N/A" }
+                $cpsUrl   = if ($rawFormatted -match "(https?://[^\s\r\n]+)")      { $matches[1].Trim() } else { "N/A" }
+
+                $extProps["Policy OID"]   = $policyId
+                $extProps["CPS Qualifier"] = $cpsUrl
+            }
+            else {
+                if (-not [string]::IsNullOrWhiteSpace($rawFormatted)) {
+                    $cleanSingleLine = ($rawFormatted -split "`r?\n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join " | "
+                    $extProps["Parsed Details"] = $cleanSingleLine
+                } else {
+                    $extProps["Raw Hex"] = [System.BitConverter]::ToString($ext.RawData)
+                }
+            }
+
+            $allExtObjects.Add([PSCustomObject]$extProps)
+        }
+
+        foreach ($obj in $allExtObjects) {
+            $tableStr = $obj | Format-Table -HideTableHeaders -AutoSize | Out-String
+            Log-Data -Data $tableStr
+        }
+
+        $certStr = $cert | Select-Object * | Format-List | Out-String
+        Log-Data -Data $certStr
+    }
+}
+
+function Get-RegIntermediateCerts {
+    $BasePath = "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\IntermediateCACertStore\Certificates"
+
+    if (-not (Test-Path $BasePath)) {
+        return
+    }
+
+    Log-Data "`n`n---Reg Intermediate Certs---"
+
+    $subKeys = Get-ChildItem -Path $BasePath -ErrorAction SilentlyContinue
+
+    if (-not $subKeys) {
+        return
+    }
+
+    foreach ($key in $subKeys) {
+        Log-Data " PROCESSING: $($key.PSPath)"
+        Get-TpmCertificateDetails -RegistryPath $key.PSPath
+    }
+}
+
 # =========================================================================
 # FIX Menu
 # =========================================================================
@@ -3163,7 +3271,7 @@ function Show-TpmGuiFormMessage {
         }
 
         $form = New-Object System.Windows.Forms.Form -Property @{
-            Text            = "TPM Diagnostics Tool"
+            Text            = "TPM INFO Tool"
             Size            = New-Object System.Drawing.Size(620, 370)
             StartPosition   = "CenterScreen"
             FormBorderStyle = "FixedSingle"
@@ -3242,11 +3350,14 @@ function Show-TpmGuiFormMessage {
                     $btnUpload.BackColor = [System.Drawing.Color]::Transparent
                     $btnUpload.Enabled   = $false
 
-                    $bufferText = ($global:ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+					$bufferText = ($global:ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+					$bufferData = ($global:DataBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+
                     $ms = New-Object System.IO.MemoryStream
                     $gzip = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
                     $writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
                     $writer.Write($bufferText)
+					$writer.Write($bufferData)
                     $writer.Close()
                     $gzip.Close()
                     $compressedData = [Convert]::ToBase64String($ms.ToArray())
@@ -4020,6 +4131,7 @@ function Invoke-MainExecution {
 		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims)
 		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
 		MotherboardSwap       = $(Step-Progress; Test-MotherboardSwap)
+		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
