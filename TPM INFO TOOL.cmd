@@ -1801,6 +1801,7 @@ function Get-TpmEkChainInfo {
                 Role     = "$role : $certPathString"
                 Subject  = $cert.Subject.Split(',')[0].Trim()
                 SKI      = $skiDisplay
+				AKI      = $akiDisplay
             }
 
             if (-not [string]::IsNullOrWhiteSpace($aiaUrl)) {
