@@ -1695,8 +1695,7 @@ function Test-ODCA {
     $cleanKey = ($Key -replace '[\s:-]', '').ToUpper()
 
     $regPaths = @(
-        "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\IntermediateCACertStore\Certificates",
-        "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\EKCertStore\Certificates"
+        "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\IntermediateCACertStore\Certificates"
     )
 
     $foundCerts = [System.Collections.Generic.List[System.Security.Cryptography.X509Certificates.X509Certificate2]]::new()
