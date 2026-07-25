@@ -1329,26 +1329,57 @@ function Get-EfiBootSignature {
     )
 
     if ($DriveLetter -notmatch ':$') { $DriveLetter += ':' }
-    $bootPath = "$DriveLetter\EFI\Microsoft\Boot\bootmgfw.efi"
+
+    $winPath = "$DriveLetter\EFI\Microsoft\Boot\bootmgfw.efi"
+    $grubPaths = @(
+        "$DriveLetter\EFI\ubuntu\shimx64.efi",
+        "$DriveLetter\EFI\ubuntu\grubx64.efi",
+        "$DriveLetter\EFI\debian\shimx64.efi",
+        "$DriveLetter\EFI\debian\grubx64.efi",
+        "$DriveLetter\EFI\fedora\shimx64.efi",
+        "$DriveLetter\EFI\arch\grubx64.efi",
+        "$DriveLetter\EFI\BOOT\grubx64.efi"
+    )
 
     try {
         $null = mountvol $DriveLetter /s
 
-        if (Test-Path -Path $bootPath) {
-            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromSignedFile($bootPath)
-            $issuer = $cert.Issuer
+        $year = "Unknown"
+        $fileToTest = $winPath
 
-            if ($issuer -like "*2023*") {
-                return "2023"
+        if (-not (Test-Path -Path $fileToTest)) {
+            $fileToTest = $grubPaths | Where-Object { Test-Path -Path $_ } | Select-Object -First 1
+        }
+
+        if ($fileToTest -and (Test-Path -Path $fileToTest)) {
+            try {
+                $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromSignedFile($fileToTest)
+                if ($cert.Issuer -like "*2023*") { $year = "2023" }
+                elseif ($cert.Issuer -like "*2011*") { $year = "2011" }
             }
-            elseif ($issuer -like "*2011*") {
-                return "2011"
+            catch {
+                $year = "Unsigned"
             }
         }
-        return "Unknown"
+
+        $hasGrub = $false
+        foreach ($path in $grubPaths) {
+            if (Test-Path -Path $path) {
+                $hasGrub = $true
+                break
+            }
+        }
+
+        return [PSCustomObject]@{
+            HasGrub = $hasGrub
+            Year    = $year
+        }
     }
     catch {
-        return "Unknown"
+        return [PSCustomObject]@{
+            HasGrub = $false
+            Year    = "Unknown"
+        }
     }
     finally {
         $null = mountvol $DriveLetter /d
@@ -2795,11 +2826,11 @@ function Show-PCR_Message() {
 
     if (-not $HasFailures) {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
-		$global:HasPCRFailures = $true
     } else {
         Log-Output "[FAIL] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'Red'
 		Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
+		$global:HasPCRFailures = $true
     }
 }
 
@@ -3752,6 +3783,11 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
+	if($Data.EfiBootSignature.HasGrub -and($global:HasPCRFailures)){
+		Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
+		Has-Issue
+	}
+
 	if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($global:HasPCRFailures) ) {
 		Log-Output "PCR MISMATCH'." 'Yellow'
 		Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
@@ -4029,7 +4065,11 @@ function Show-UIOutput ($Data) {
 	$Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
 		Log-Output $_
 	}
-	Log-Output "Efi Boot: $($Data.EfiBootSignature)" 'White'
+	Log-Output "Efi Boot: $($Data.EfiBootSignature.Year)" 'White'
+
+	if($Data.EfiBootSignature.HasGrub){
+		Log-Output "[WARN] Grub Found" 'Yellow'
+	}
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
