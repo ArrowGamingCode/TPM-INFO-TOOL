@@ -3794,14 +3794,14 @@ function Show-Banner {
         $padding    = " " * 17
 	}
 
-    &$LogCmd "=========================================================================" 'Cyan'
+    &$LogCmd "=======================================================================" 'Cyan'
     &$LogCmd "| $padding [ OVERALL: TPM Attestation $statusText ] $padding |" $color
     PrintLargeOverallResult $statusText
-    &$LogCmd "=========================================================================" 'Cyan'
+    &$LogCmd "=======================================================================" 'Cyan'
 }
 
 function PrintLargeOverallResult ($result) {
-    Write-Host "=========================================================================" -ForegroundColor Blue
+    Write-Host "=======================================================================" -ForegroundColor Blue
 
     if ($result -eq 'PASS') {
         $ascii = @'
