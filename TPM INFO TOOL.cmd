@@ -219,6 +219,7 @@ function Get-BiosCompliance {
     return [PSCustomObject]@{
         String = '{0} (Released: {1})' -f $biosObj.SMBIOSBIOSVersion, $dateString
         Passed = $isPassed
+		Release = $dateString
     }
 }
 
@@ -3667,7 +3668,8 @@ function Show-UserRecommendedSteps ($Data) {
         if ($Data.BitLocker -and $Data.BitLocker.Passed -eq $false) {
             Log-Output "Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
         } else {
-            Log-Output "Your current AMD TPM firmware version requires an update, but you have bitlocker." 'Yellow'
+			Log-Output "BitLocker is active, you MUST save your Recovery Key BEFORE updating or clearing the TPM to avoid being locked out." 'Red'
+            Log-Output "Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. " 'Yellow'
         }
         Has-Issue
     }
@@ -3683,8 +3685,9 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if (!$Data.BiosInfo.Passed) {
-		if ($Data.CpuInfo.Socket -eq "AM4") {
+		if ($Data.CpuInfo.Socket -eq "AM4" -and $Data.TpmInfo.AmdFixRequired) {
 			Log-Output "ALL AM4 systems need a BIOS update after ~August 2025. Check if there is a newer BIOS" 'Yellow'
+			Log-Output "Your BIOS is from: $($Data.BiosInfo.Release)" 'Yellow'
 		} else {
 			Log-Output "Check if there is a newer BIOS" 'Yellow'
 		}
