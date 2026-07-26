@@ -2623,7 +2623,7 @@ function Show-FixMenu {
     }
 }
 
-function Reset-WindowsCache{
+function Reset-WindowsCache {
 	$Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
 	$Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
 	if (Test-Path $Path1) {
@@ -2640,6 +2640,17 @@ function Reset-WindowsCache{
 	Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
 
 	Start-TPM-Maintenance
+
+	for ($i = 10; $i -gt 0; $i--) {
+		Write-Host "`nWaiting for TPM maintenance... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
+		Start-Sleep -Seconds 1
+	}
+
+	Write-Progress -Activity "Waiting" -Completed
+	Write-Host "`nenrollaik.."
+	certreq -q -enrollaik -f -config '""'
+	certutil -pulse
+
 	Write-Host "Actioned" -ForegroundColor Green
 }
 
