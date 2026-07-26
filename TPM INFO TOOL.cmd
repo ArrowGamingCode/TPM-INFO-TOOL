@@ -2612,6 +2612,8 @@ function Show-FixMenu {
 	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
 	Write-Host "4) Print PCR Table"                               -ForegroundColor White
 	Write-Host "5) Print DBX Table"                               -ForegroundColor White
+	Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
+	Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
 
@@ -2638,6 +2640,16 @@ function Show-FixMenu {
 			pause
 			Show-FixMenu
         }
+        "6" {
+            DISM /Online /Cleanup-Image /RestoreHealth
+			pause
+			Show-FixMenu
+        }
+        "7" {
+            ViewWindowsComponentRepairedIssues
+			pause
+			Show-FixMenu
+        }
         "Q" {
 			cls
             exit
@@ -2647,6 +2659,16 @@ function Show-FixMenu {
             Show-FixMenu -Message "Invalid selection. Please try again."
         }
     }
+}
+
+function ViewWindowsComponentRepairedIssues {
+	$logFiles = Get-ChildItem "$env:windir\Logs\CBS\CBS*.log", "$env:windir\Logs\DISM\dism*.log" -ErrorAction SilentlyContinue
+
+	$logFiles | ForEach-Object {
+	Get-Content $_.FullName -ReadCount 1000 | ForEach-Object {
+	$_ -match 'Repairing|Repaired|Corrupt|Has been repaired|Repair complete|Fixed|Successfully repaired|Restored'
+	}
+	} | Select-Object -Unique
 }
 
 function Reset-WindowsCache {
