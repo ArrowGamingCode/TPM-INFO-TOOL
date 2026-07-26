@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 67
+$global:TotalSteps = 68
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -2588,6 +2588,24 @@ function Get-RegIntermediateCerts {
     }
 }
 
+function Test-BasicDismHealth {
+    $dismOutput = dism.exe /Online /Cleanup-Image /CheckHealth 2>&1 | Out-String
+    return ($dismOutput -match "No component store corruption detected")
+}
+
+function Test-DismHealthAsync {
+    return Start-Job -ScriptBlock {
+        $dismOutput = dism.exe /Online /Cleanup-Image /ScanHealth 2>&1 | Out-String
+        return ($dismOutput -match "No component store corruption detected")
+    }
+}
+
+function Display-DismMessage {
+	write-host "========================================================================="
+	write-host "Waiting for DISM.."
+	write-host "========================================================================="
+}
+
 # =========================================================================
 # FIX Menu
 # =========================================================================
@@ -4069,6 +4087,12 @@ function Show-UIOutput ($Data) {
 		Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
 	}
 
+	if ($Data.BasicDismHealth){
+		Log-Output "[PASS] Basic Dism" 'Green'
+	}else{
+		Log-Output "[WARN] Basic Dism" 'Yellow'
+	}
+
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery: $($Data.BatteryInfo.Text)"
 
@@ -4262,6 +4286,8 @@ function Show-UIOutput ($Data) {
 # =========================================================================
 
 function Invoke-MainExecution {
+	$job = Test-DismHealthAsync
+
     $global:platforms = Get-PlatformInstallStatus
 
 	$originalOS = "Unknown"
@@ -4342,6 +4368,7 @@ function Invoke-MainExecution {
 		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
 		IsWindowsBootFirst    = $(Step-Progress; Test-IsWindowsBootFirst)
 		UefiGrubShimEntry     = $(Step-Progress; Test-UefiGrubShimEntry)
+		BasicDismHealth       = $(Step-Progress; Test-BasicDismHealth)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
