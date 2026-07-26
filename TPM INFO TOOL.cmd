@@ -2393,7 +2393,11 @@ function Get-DbxRevocationScore {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [string[]]$Hashes
+        [string[]]$Hashes,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Count', 'Both')]
+        [string]$DisplayType = 'Both'
     )
 
     begin {
@@ -2414,13 +2418,17 @@ function Get-DbxRevocationScore {
     }
 
     end {
-        if ($script:InputHashes.Count -eq 0) {
+        $Total = $script:InputHashes.Count
+        if ($Total -eq 0) {
             return 0
         }
 
         $MatchCount = ($script:InputHashes | Where-Object { $script:DbxHex -like "*$_*" }).Count
 
-        return "$($MatchCount)/$($Hashes.Count)"
+        switch ($DisplayType) {
+            'Count'      { return $MatchCount }
+            'Both'       { return "$MatchCount/$Total" }
+        }
     }
 }
 
@@ -4366,7 +4374,7 @@ function Invoke-MainExecution {
 		HasEK			      = $(Step-Progress; HasEK)
 		LatestUpdatesSummary  = $(Step-Progress; Get-LatestUpdatesSummary)
 		ScoreShims 		      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedShims)
-		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims)
+		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims -DisplayType Count)
 		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
 		MotherboardSwap       = $(Step-Progress; Test-MotherboardSwap)
 		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
