@@ -2562,7 +2562,11 @@ function Get-TpmCertificateDetails {
             Log-Data -Data $tableStr
         }
 
-        $certStr = $cert | Select-Object * | Format-List | Out-String
+		$certDetails = $cert | Select-Object *,
+            @{Name = 'PublicKey'; Expression = { $_.GetPublicKeyString() }},
+            @{Name = 'PublicKeyAlgorithm'; Expression = { $_.PublicKey.Oid.FriendlyName }} -ExcludeProperty PublicKey
+
+        $certStr = $certDetails | Format-List | Out-String
         Log-Data -Data $certStr
     }
 }
