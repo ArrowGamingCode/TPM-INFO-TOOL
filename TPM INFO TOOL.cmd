@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 65
+$global:TotalSteps = 67
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -1331,29 +1331,15 @@ function Get-EfiBootSignature {
     if ($DriveLetter -notmatch ':$') { $DriveLetter += ':' }
 
     $winPath = "$DriveLetter\EFI\Microsoft\Boot\bootmgfw.efi"
-    $grubPaths = @(
-        "$DriveLetter\EFI\ubuntu\shimx64.efi",
-        "$DriveLetter\EFI\ubuntu\grubx64.efi",
-        "$DriveLetter\EFI\debian\shimx64.efi",
-        "$DriveLetter\EFI\debian\grubx64.efi",
-        "$DriveLetter\EFI\fedora\shimx64.efi",
-        "$DriveLetter\EFI\arch\grubx64.efi",
-        "$DriveLetter\EFI\BOOT\grubx64.efi"
-    )
 
     try {
         $null = mountvol $DriveLetter /s
 
         $year = "Unknown"
-        $fileToTest = $winPath
 
-        if (-not (Test-Path -Path $fileToTest)) {
-            $fileToTest = $grubPaths | Where-Object { Test-Path -Path $_ } | Select-Object -First 1
-        }
-
-        if ($fileToTest -and (Test-Path -Path $fileToTest)) {
+        if (Test-Path -Path $winPath) {
             try {
-                $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromSignedFile($fileToTest)
+                $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromSignedFile($winPath)
                 if ($cert.Issuer -like "*2023*") { $year = "2023" }
                 elseif ($cert.Issuer -like "*2011*") { $year = "2011" }
             }
@@ -1362,27 +1348,67 @@ function Get-EfiBootSignature {
             }
         }
 
-        $hasGrub = $false
-        foreach ($path in $grubPaths) {
-            if (Test-Path -Path $path) {
-                $hasGrub = $true
-                break
-            }
-        }
-
         return [PSCustomObject]@{
-            HasGrub = $hasGrub
-            Year    = $year
+            Year = $year
         }
     }
     catch {
         return [PSCustomObject]@{
-            HasGrub = $false
-            Year    = "Unknown"
+            Year = "Unknown"
         }
     }
     finally {
         $null = mountvol $DriveLetter /d
+    }
+}
+
+function Test-IsWindowsBootFirst {
+    try {
+        $output = bcdedit /enum '{fwbootmgr}' 2>$null
+        $lineIndex = [array]::IndexOf(($output | ForEach-Object { $_.Trim() -match "^displayorder" }), $true)
+
+        if ($lineIndex -ge 0) {
+            $firstId = ($output[$lineIndex] -replace "^displayorder\s+", "").Trim()
+            return ($firstId -eq "{bootmgr}")
+        }
+
+        return $false
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-UefiGrubShimEntry {
+    [CmdletBinding()]
+    param()
+
+    $rawBcd = (bcdedit /enum firmware 2>&1) -join "`n"
+
+    if ([string]::IsNullOrWhiteSpace($rawBcd)) {
+        return [PSCustomObject]@{ HasLinuxEntry = $false; DetectedEntries = @() }
+    }
+
+    $blocks = $rawBcd -split '(?:\r?\n){2,}'
+    $pattern = 'shimx64|grubx64'
+
+    $detectedEntries = @(foreach ($block in $blocks) {
+        $path        = if ($block -match 'path\s+(.+)')        { $Matches[1].Trim() } else { "" }
+        $identifier  = if ($block -match 'identifier\s+(.+)')  { $Matches[1].Trim() } else { "" }
+        $description = if ($block -match 'description\s+(.+)') { $Matches[1].Trim() } else { "" }
+
+        if ($path -match $pattern) {
+            [PSCustomObject]@{
+                Identifier  = $identifier
+                Description = $description
+                Path        = $path
+            }
+        }
+    })
+
+    return [PSCustomObject]@{
+        HasLinuxEntry   = ($detectedEntries.Count -gt 0)
+        DetectedEntries = $detectedEntries
     }
 }
 
@@ -3794,8 +3820,14 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-	if($Data.EfiBootSignature.HasGrub -and($global:HasPCRFailures)){
+	if($Data.UefiGrubShimEntry -and $global:HasPCRFailures){
 		Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
+		Has-Issue
+	}
+
+	if(!$Data.IsWindowsBootFirst){
+		Log-Output "Windows Boot Manager is not the first to boot. Grub?" 'Red'
+		Log-Output "-> (Be careful): bcdedit /set {fwbootmgr} displayorder {bootmgr} /addfirst"
 		Has-Issue
 	}
 
@@ -4078,8 +4110,8 @@ function Show-UIOutput ($Data) {
 	}
 	Log-Output "Efi Boot: $($Data.EfiBootSignature.Year)" 'White'
 
-	if($Data.EfiBootSignature.HasGrub){
-		Log-Output "[WARN] Grub Found" 'Yellow'
+	if(!$Data.IsWindowsBootFirst){
+		Log-Output "[WARN] Windows Boot Manager is not the first boot" 'Yellow'
 	}
 
 	Log-Output "`n--- CERTREQ ---" 'Cyan'
@@ -4286,6 +4318,8 @@ function Invoke-MainExecution {
 		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
 		MotherboardSwap       = $(Step-Progress; Test-MotherboardSwap)
 		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
+		IsWindowsBootFirst    = $(Step-Progress; Test-IsWindowsBootFirst)
+		UefiGrubShimEntry     = $(Step-Progress; Test-UefiGrubShimEntry)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
