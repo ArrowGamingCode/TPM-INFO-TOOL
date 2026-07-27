@@ -723,14 +723,30 @@ function Get-CsmStatus {
 
 function Get-CoreIsolationHardwareStatus {
     try {
-        $sysInfo = Get-CimInstance -ClassName Win32_ComputerSystem
-        if ($sysInfo.HypervisorPresent -eq $true) {
-            return [PSCustomObject]@{ Passed = $true }
-        } else {
-            return [PSCustomObject]@{ Passed = $false }
+        $sysInfo = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+
+        $coreIsolationEnabled = [bool]$sysInfo.HypervisorPresent
+        $dmaProtectionEnabled = [bool]$sysInfo.KernelDMAProtectionEnabled
+
+        $passed = $coreIsolationEnabled -and $dmaProtectionEnabled
+
+        $coreIsolationStatus = if ($coreIsolationEnabled) { "ON" } else { "OFF" }
+        $dmaProtectionStatus = if ($dmaProtectionEnabled) { "ON" } else { "OFF" }
+
+        [PSCustomObject]@{
+            Passed                   = $passed
+            Message                  = "Core Isolation: $coreIsolationStatus"
+            CoreIsolationEnabled     = $coreIsolationEnabled
+            KernelDMAEnabled         = $dmaProtectionEnabled
+            CoreIsolationStatus      = $coreIsolationStatus
+            KernelDMAProtectionStatus = $dmaProtectionStatus
         }
-    } catch {
-        return [PSCustomObject]@{ Text = "Error reading Virtualization Layer"; Passed = $false }
+    }
+    catch {
+        [PSCustomObject]@{
+            Passed  = $false
+            Message = "Error"
+        }
     }
 }
 
@@ -4110,9 +4126,9 @@ function Show-UIOutput ($Data) {
 
     Show-PlatformStatus
 
-     if ($Data.CoreIsolation.Passed) { Log-Output "RESULT: Core Isolation Pass" 'Green'
+     if ($Data.CoreIsolation.Passed) { Log-Output "[PASS]: $($Data.CoreIsolation.Message)" 'Green'
 	} else {
-		Log-Output "RESULT: Core Isolation Off"
+		Log-Output "Info: $($Data.CoreIsolation.Message)"
 	}
 
 	Log-Output "IME Driver Ver: $($Data.IntelMeVersion.DriverVersion) - Firmware Ver: $($Data.IntelMeVersion.FirmwareVersion) - Date: $($Data.IntelMeVersion.DriverDate)"
