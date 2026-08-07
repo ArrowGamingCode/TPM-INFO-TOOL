@@ -2658,13 +2658,14 @@ function Get-RegIntermediateCerts {
 
 function Test-DismHealthAsync {
     return Start-Job -ScriptBlock {
-        $dismOutput = dism.exe /Online /Cleanup-Image /ScanHealth 2>&1 | Out-String
-		$NoCorruption = ($dismOutput -match "No component store corruption detected")
-		if(!$NoCorruption){
-			ViewWindowsComponentRepairedIssues -LogTarget 'Log-Data'
-		}
+        $result = Repair-WindowsImage -Online -ScanHealth
 
-        return $NoCorruption
+        if ($result.ImageHealth -ne 'Healthy') {
+            ViewWindowsComponentRepairedIssues -LogTarget 'Log-Data'
+            return $false
+        }
+
+        return $true
     }
 }
 
@@ -4180,7 +4181,9 @@ function Show-UIOutput ($Data) {
 		Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
 	}
 
-	if ($Data.dismFullHealth){
+	if ($Data.dismFullHealth -eq "NA" ){
+		Log-Output "[INFO] Dism NA" 'white'
+	}elseif ($Data.dismFullHealth){
 		Log-Output "[PASS] Dism" 'Green'
 	}else{
 		Log-Output "[WARN] Dism" 'Yellow'
@@ -4484,8 +4487,29 @@ function Invoke-MainExecution {
 	$systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
 
 	write-host "Checking Windows DISM.. May take a minute." -ForegroundColor White
-	if (!$global:isTest){
-		job | Wait-Job
+	if (!$global:isTest) {
+		$timeoutSeconds = 110
+		$timer = [System.Diagnostics.Stopwatch]::StartNew()
+
+		while ($job.State -eq 'Running' -and $timer.Elapsed.TotalSeconds -lt $timeoutSeconds) {
+			$lastProgress = $job.ChildJobs[0].Progress | Select-Object -Last 1
+
+			if ($lastProgress) {
+				Write-Progress -Activity "Checking Windows DISM" `
+							   -Status $lastProgress.StatusDescription `
+							   -PercentComplete $lastProgress.PercentComplete
+			}
+
+			Start-Sleep -Milliseconds 500
+		}
+		$timer.Stop()
+		Write-Progress -Activity "Checking Windows DISM" -Completed
+
+		if ($job.State -eq 'Running') {
+			Stop-Job -Job $job
+			Remove-Job -Job $job
+			$job = "NA"
+		}
 	}
 	$systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
 
