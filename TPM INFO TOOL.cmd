@@ -2527,11 +2527,36 @@ function Log-Data ($Data) {
     }
 }
 
+function Log-Helper {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, Position = 0)]
+        [psobject]$Message,
+
+        [Parameter(Position = 1)]
+        [ValidateSet('Log-Data', 'Log-Output', 'Log-None')]
+        [string]$LogTarget = 'Log-None'
+    )
+
+    process {
+        switch ($LogTarget) {
+            'Log-Data'   { Log-Data -Message $Message }
+            'Log-Output' { Log-Output $Message 'White'}
+            'Log-None'   { break }
+            default      { Write-Verbose "Unrecognized log target: $LogTarget" }
+        }
+    }
+}
+
 function Get-TpmCertificateDetails {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, Position = 0)]
-        [string]$RegistryPath
+        [string]$RegistryPath,
+
+        [Parameter(Position = 1)]
+        [ValidateSet('Log-Data', 'Log-Output', 'Log-None')]
+        [string]$LogTarget = 'Log-None'
     )
 
     process {
@@ -2574,7 +2599,7 @@ function Get-TpmCertificateDetails {
                 $policyId = if ($rawFormatted -match "Policy Identifier=([^\r\n]+)") { $matches[1].Trim() } else { "N/A" }
                 $cpsUrl   = if ($rawFormatted -match "(https?://[^\s\r\n]+)")      { $matches[1].Trim() } else { "N/A" }
 
-                $extProps["Policy OID"]   = $policyId
+                $extProps["Policy OID"]    = $policyId
                 $extProps["CPS Qualifier"] = $cpsUrl
             }
             else {
@@ -2591,26 +2616,32 @@ function Get-TpmCertificateDetails {
 
         foreach ($obj in $allExtObjects) {
             $tableStr = $obj | Format-Table -HideTableHeaders -AutoSize | Out-String
-            Log-Data -Data $tableStr
+            Log-Helper -Message $tableStr -LogTarget $LogTarget
         }
 
-		$certDetails = $cert | Select-Object *,
+        $certDetails = $cert | Select-Object *,
             @{Name = 'PublicKey'; Expression = { $_.GetPublicKeyString() }},
             @{Name = 'PublicKeyAlgorithm'; Expression = { $_.PublicKey.Oid.FriendlyName }} -ExcludeProperty PublicKey
 
         $certStr = $certDetails | Format-List | Out-String
-        Log-Data -Data $certStr
+        Log-Helper -Message $certStr -LogTarget $LogTarget
     }
 }
 
 function Get-RegIntermediateCerts {
+    [CmdletBinding()]
+    param (
+        [ValidateSet('Log-Data', 'Log-Output', 'Log-None')]
+        [string]$LogTarget = 'Log-None'
+    )
+
     $BasePath = "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI\Endorsement\IntermediateCACertStore\Certificates"
 
     if (-not (Test-Path $BasePath)) {
         return
     }
 
-    Log-Data "`n`n---Reg Intermediate Certs---"
+    Log-Helper "`n`n---Reg Intermediate Certs---`n" -LogTarget $LogTarget
 
     $subKeys = Get-ChildItem -Path $BasePath -ErrorAction SilentlyContinue
 
@@ -2619,8 +2650,8 @@ function Get-RegIntermediateCerts {
     }
 
     foreach ($key in $subKeys) {
-        Log-Data " PROCESSING: $($key.PSPath)"
-        Get-TpmCertificateDetails -RegistryPath $key.PSPath
+        Log-Helper " PROCESSING: $($key.PSPath)" -LogTarget $LogTarget
+        Get-TpmCertificateDetails -RegistryPath $key.PSPath -LogTarget $LogTarget
     }
 }
 
@@ -2668,6 +2699,8 @@ function Show-FixMenu {
 	Write-Host "5) Print DBX Table"                               -ForegroundColor White
 	Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
 	Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
+	Write-Host "8) View Intermediate Cert Details"                -ForegroundColor White
+
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
 
@@ -2701,6 +2734,11 @@ function Show-FixMenu {
         }
         "7" {
             ViewWindowsComponentRepairedIssues
+			pause
+			Show-FixMenu
+        }
+        "8" {
+            Get-RegIntermediateCerts -LogTarget Log-Output
 			pause
 			Show-FixMenu
         }
