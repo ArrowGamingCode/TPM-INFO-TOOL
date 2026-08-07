@@ -2995,8 +2995,10 @@ function Show-PCR_Message() {
         }
     }
 
-    if (-not $HasFailures) {
-        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers.)" 'Green'
+	if($MatchCount -eq 0){
+	    Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
+	}elseif (-not $HasFailures) {
+        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers." 'Green'
     } else {
         Log-Output "[FAIL] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'Red'
 		Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
