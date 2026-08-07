@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.17"
+set "TPM_TOOL_VERSION=1.0.18"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 68
+$global:TotalSteps = 67
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -63,6 +63,7 @@ $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
 $global:HasPCRFailures = $false
 $global:EnableUploadFeature = $true
+$global:isTest = ($TestFile -and (Test-Path $TestFile))
 
 # =========================================================================
 # FUNCTIONS
@@ -2167,7 +2168,7 @@ function Get-UacStatus {
 
 function Get-CertreqAttestation($Data) {
 	Write-Host "Testing Certreq.." -ForegroundColor White
-	if ($TestFile -and (Test-Path $TestFile)) {
+	if ($global:isTest) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
         $oldCulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
@@ -2540,10 +2541,10 @@ function Log-Helper {
 
     process {
         switch ($LogTarget) {
-            'Log-Data'   { Log-Data -Message $Message }
+            'Log-Data'   { Log-Data $Message }
             'Log-Output' { Log-Output $Message 'White'}
             'Log-None'   { break }
-            default      { Write-Verbose "Unrecognized log target: $LogTarget" }
+            default      { Write-Verbose "Unrecognized log target" }
         }
     }
 }
@@ -2655,15 +2656,15 @@ function Get-RegIntermediateCerts {
     }
 }
 
-function Test-BasicDismHealth {
-    $dismOutput = dism.exe /Online /Cleanup-Image /CheckHealth 2>&1 | Out-String
-    return ($dismOutput -match "No component store corruption detected")
-}
-
 function Test-DismHealthAsync {
     return Start-Job -ScriptBlock {
         $dismOutput = dism.exe /Online /Cleanup-Image /ScanHealth 2>&1 | Out-String
-        return ($dismOutput -match "No component store corruption detected")
+		$NoCorruption = ($dismOutput -match "No component store corruption detected")
+		if(!$NoCorruption){
+			ViewWindowsComponentRepairedIssues -LogTarget 'Log-Data'
+		}
+
+        return $NoCorruption
     }
 }
 
@@ -2733,7 +2734,7 @@ function Show-FixMenu {
 			Show-FixMenu
         }
         "7" {
-            ViewWindowsComponentRepairedIssues
+            ViewWindowsComponentRepairedIssues -LogTarget 'Log-Output'
 			pause
 			Show-FixMenu
         }
@@ -2754,13 +2755,31 @@ function Show-FixMenu {
 }
 
 function ViewWindowsComponentRepairedIssues {
-	$logFiles = Get-ChildItem "$env:windir\Logs\CBS\CBS*.log", "$env:windir\Logs\DISM\dism*.log" -ErrorAction SilentlyContinue
+    [CmdletBinding()]
+    param (
+        [ValidateSet('Log-Data', 'Log-Output', 'Log-None')]
+        [string]$LogTarget = 'Log-None'
+    )
 
-	$logFiles | ForEach-Object {
-	Get-Content $_.FullName -ReadCount 1000 | ForEach-Object {
-	$_ -match 'Repairing|Repaired|Corrupt|Has been repaired|Repair complete|Fixed|Successfully repaired|Restored'
-	}
-	} | Select-Object -Unique
+    $logFiles = Get-ChildItem "$env:windir\Logs\CBS\CBS*.log", "$env:windir\Logs\DISM\dism*.log" -ErrorAction SilentlyContinue
+
+    if (-not $logFiles) {
+        return
+    }
+
+    Log-Helper "`n`n---Windows Component Repaired Issues---`n" -LogTarget $LogTarget
+
+    $repairedIssues = $logFiles | ForEach-Object {
+        Log-Helper " PROCESSING: $($_.FullName)" -LogTarget $LogTarget
+
+        Get-Content $_.FullName -ReadCount 1000 | ForEach-Object {
+            $_ -match 'Repairing|Repaired|Corrupt|Has been repaired|Repair complete|Fixed|Successfully repaired|Restored'
+        }
+    } | Select-Object -Unique
+
+    foreach ($issue in $repairedIssues) {
+        Log-Helper $issue -LogTarget $LogTarget
+    }
 }
 
 function Reset-WindowsCache {
@@ -4161,10 +4180,10 @@ function Show-UIOutput ($Data) {
 		Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
 	}
 
-	if ($Data.BasicDismHealth){
-		Log-Output "[PASS] Basic Dism" 'Green'
+	if ($Data.dismFullHealth){
+		Log-Output "[PASS] Dism" 'Green'
 	}else{
-		Log-Output "[WARN] Basic Dism" 'Yellow'
+		Log-Output "[WARN] Dism" 'Yellow'
 	}
 
 	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
@@ -4364,7 +4383,10 @@ function Show-UIOutput ($Data) {
 # =========================================================================
 
 function Invoke-MainExecution {
-	$job = Test-DismHealthAsync
+	$job = $true
+	if (!$global:isTest){
+		$job = Test-DismHealthAsync
+	}
 
     $global:platforms = Get-PlatformInstallStatus
 
@@ -4446,7 +4468,6 @@ function Invoke-MainExecution {
 		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
 		IsWindowsBootFirst    = $(Step-Progress; Test-IsWindowsBootFirst)
 		UefiGrubShimEntry     = $(Step-Progress; Test-UefiGrubShimEntry)
-		BasicDismHealth       = $(Step-Progress; Test-BasicDismHealth)
     }
 
 	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
@@ -4461,6 +4482,12 @@ function Invoke-MainExecution {
 	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
 	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
 	$systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
+
+	write-host "Checking Windows DISM.. May take a minute." -ForegroundColor White
+	if (!$global:isTest){
+		job | Wait-Job
+	}
+	$systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
 
     Show-UIOutput -Data $systemData
 	return $systemData
