@@ -1789,6 +1789,7 @@ function Test-ODCA {
         return $null
     }
 
+	$isCSMETGLPTT01SVN = [bool]($foundCerts | Where-Object { $_.Subject -like "*CN=CSME TGL PTT*01SVN*" })
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     foreach ($cert in $foundCerts) {
@@ -1836,6 +1837,7 @@ function Test-ODCA {
             AKI        = $akiVal
             IsMatch    = $isMatch
             FoundRole  = $role
+			isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
         })
     }
 
@@ -1876,6 +1878,7 @@ function Get-TpmEkChainInfo {
     $allChainResults = [System.Collections.Generic.List[PSCustomObject]]::new()
     $keyFound = $false
     $foundRole = "None"
+	$isCSMETGLPTT01SVN = $false
 
     foreach ($leafCert in $leafCerts) {
         $chainEngine = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
@@ -1971,6 +1974,10 @@ function Get-TpmEkChainInfo {
         $regResults = Test-ODCA -Key $searchKey
         if ($regResults) {
             foreach ($regItem in $regResults) {
+				if ($regItem.isCSMETGLPTT01SVN) {
+					$isCSMETGLPTT01SVN = $true
+				}
+
                 $allChainResults.Add([PSCustomObject]@{
                     Role    = $regItem.Role
                     Subject = $regItem.Subject
@@ -1994,6 +2001,7 @@ function Get-TpmEkChainInfo {
         MatchingRole   = $foundRole
         ChainDetails   = $allChainResults
         IsIntermediate = $isIntermediate
+		isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
     }
 }
 
@@ -4264,6 +4272,10 @@ function Show-UIOutput ($Data) {
 	Show-TcgAttestationAudit -Data $Data
 
     Log-Output "`n---- TRUST ---" 'Cyan'
+	if($Data.TPMChainInfo.isCSMETGLPTT01SVN){
+		Log-Output "[INVESTIGATE] PTT 01SVN Cert" 'Yellow'
+	}
+
 	if($Data.TPMChainInfo.KeyFound -and $Data.TPMChainInfo.IsIntermediate){
 		Log-Output "[PASS] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Green'
 	}
