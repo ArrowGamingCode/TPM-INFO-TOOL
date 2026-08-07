@@ -2997,6 +2997,7 @@ function Show-PCR_Message() {
 
 	if($MatchCount -eq 0){
 	    Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
+		$global:HasPCRFailures = $true
 	}elseif (-not $HasFailures) {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers." 'Green'
     } else {
