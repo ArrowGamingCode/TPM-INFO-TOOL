@@ -3029,7 +3029,6 @@ function Show-PlatformStatus {
     }
 
     if ($foundPlatforms.Count -gt 0) {
-        # Joins the array elements with '/' (e.g., "Steam/BNET")
         $platformString = $foundPlatforms -join "/"
         Log-Output "RESULT: COD $platformString Found"
     } else {
