@@ -2702,6 +2702,7 @@ function Show-FixMenu {
 	Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
 	Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
 	Write-Host "8) View Intermediate Cert Details"                -ForegroundColor White
+	Write-Host "9) Intel CSME check"                              -ForegroundColor White
 
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
@@ -2743,6 +2744,9 @@ function Show-FixMenu {
             Get-RegIntermediateCerts -LogTarget Log-Output
 			pause
 			Show-FixMenu
+        }
+        "9" {
+            Show-FixMenu -Message "CSME: $(Get-IntelCsmeStatus)"
         }
         "Q" {
 			cls
@@ -2917,8 +2921,96 @@ function Print-DBX {
             else { $_.SerialNumber }
         }}
 
-    # Return the variable so it still outputs to console if desired
     return $script:dbxData
+}
+
+function Get-IntelCsmeStatus {
+    [CmdletBinding()]
+    param ()
+
+    $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+    if ($cpu.Manufacturer -notlike "*Intel*") {
+        return "NA - CPU"
+    }
+
+    $targetDir   = "C:\ProgramData\Intel\CSME"
+    $targetExe   = Join-Path $targetDir "CSME-Version-Detection-Tool-console.exe"
+    $downloadUrl = "https://downloadmirror.intel.com/28632/eng/CSME_Version_Detection_Tool_Windows.zip"
+    $tempZip     = Join-Path $env:TEMP "CSME_Version_Detection_Tool_Windows.zip"
+    $tempExtract = Join-Path $env:TEMP "CSME_Extract"
+
+    if (-not (Test-Path $targetExe)) {
+        try {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing -TimeoutSec 20
+            Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+
+            $discoveryFolder = Get-ChildItem -Path $tempExtract -Recurse -Directory -Filter "DiscoveryTool" | Select-Object -First 1
+            if ($discoveryFolder) {
+                Copy-Item -Path "$($discoveryFolder.FullName)\*" -Destination $targetDir -Recurse -Force
+            } else {
+                $exeFile = Get-ChildItem -Path $tempExtract -Recurse -Filter "*.exe" |
+                           Where-Object { $_.Name -like "*CSME*" -or $_.Name -like "*Detection*" } |
+                           Select-Object -First 1
+                if ($exeFile) {
+                    Copy-Item -Path "$($exeFile.DirectoryName)\*" -Destination $targetDir -Recurse -Force
+                } else {
+                    throw "Could not locate DiscoveryTool files."
+                }
+            }
+
+            $docsFolder = Get-ChildItem -Path $tempExtract -Recurse -Directory -Filter "Documents" | Select-Object -First 1
+            if ($docsFolder) {
+                Copy-Item -Path $docsFolder.FullName -Destination $targetDir -Recurse -Force
+            }
+
+            $sourceExe = Get-ChildItem -Path $targetDir -Filter "*.exe" | Select-Object -First 1
+            if ($sourceExe -and $sourceExe.Name -ne "CSME-Version-Detection-Tool-console.exe") {
+                Rename-Item -Path $sourceExe.FullName -NewName "CSME-Version-Detection-Tool-console.exe" -Force
+            }
+        }
+        catch {
+            return "Error"
+        }
+        finally {
+            if (Test-Path $tempZip)     { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    $existingLogs = Get-ChildItem -Path $targetDir -Filter "*.log" -ErrorAction SilentlyContinue
+    if ($existingLogs) {
+        Remove-Item -Path "$targetDir\*.log" -Force -ErrorAction SilentlyContinue
+    }
+
+    try {
+        $processParams = @{
+            FilePath         = $targetExe
+            ArgumentList     = "-n -c"
+            WorkingDirectory = $targetDir
+            WindowStyle      = 'Hidden'
+            PassThru         = $true
+            Wait             = $true
+        }
+
+        $process = Start-Process @processParams
+    }
+    catch {
+        return "Error"
+    }
+
+    if (Test-Path -Path $targetDir) {
+        $logFile = Get-ChildItem -Path $targetDir -Filter "*.log" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($logFile) {
+            $statusMatch = Get-Content -Path $logFile.FullName -ErrorAction SilentlyContinue | Select-String -Pattern "Status:"
+            if ($statusMatch) {
+                return $statusMatch.Line.Trim()
+            }
+        }
+    }
+
+    return "NA"
 }
 
 # =========================================================================
