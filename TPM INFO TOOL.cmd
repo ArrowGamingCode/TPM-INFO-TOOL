@@ -3884,7 +3884,9 @@ function Show-UserRecommendedSteps ($Data) {
 		Log-Output "-> If you have secure boot enabled, but Windows still says it's disabled:" 'Yellow'
 		Log-Output "-> Explain: Windows 11 requires secure boot capable, but does not force it to be used." 'Yellow'
 		Log-Output "-> Confirm CSM (Compatibility Support Module) is disabled in BIOS." 'Yellow'
-		Log-Output "-> Then set Secure Boot Mode from Custom or Standard to Standard. Save and reboot." 'Yellow'
+		Log-Output "-> Then set Secure Boot Mode from Custom or Standard to Custom. Save and reboot." 'Yellow'
+		Log-Output "-> Then change Secure Boot Mode from Custom back to Standard. Save and Reboot." 'Yellow'
+
 		Has-Issue
 	}
 
