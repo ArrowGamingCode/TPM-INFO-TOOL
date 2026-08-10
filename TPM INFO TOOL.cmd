@@ -3882,7 +3882,7 @@ function Show-UserRecommendedSteps ($Data) {
     if (!$Data.SecureBoot.Passed) {
         Log-Output "SECURE BOOT is OFF: Please turn it on." 'Yellow'
 		Log-Output "-> Explain: Windows 11 requires secure boot capable, but does not force it to be used." 'Yellow'
-		Log-Output "-> Confirm CSM is disabled in BIOS." 'Yellow'
+		Log-Output "-> Confirm CSM (Compatibility Support Module) is disabled in BIOS." 'Yellow'
 		Log-Output "-> Then Set Secure Boot Mode from Custom or Standard to Standard (or toggle it off, then back to Standard)." 'Yellow'
         Has-Issue
     }
