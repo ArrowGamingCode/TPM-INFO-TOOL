@@ -2464,7 +2464,10 @@ function Test-MotherboardSwap {
     $bios = Get-CimInstance Win32_BIOS
 
     if ($winInstallDate -gt (Get-Date).AddDays(-50)) {
-        return "None"
+        return [PSCustomObject]@{
+            WasSwapped = $false
+            Message    = "None"
+        }
     }
 
     $chipsetDrivers = Get-WindowsDriver -Online | Where-Object {
@@ -2504,13 +2507,22 @@ function Test-MotherboardSwap {
     }
 
     if ($score -ge 2) {
-        return "Yes"
+        return [PSCustomObject]@{
+            WasSwapped = $true
+            Message    = "Yes"
+        }
     }
     elseif ($score -eq 1) {
-        return "Likely"
+        return [PSCustomObject]@{
+            WasSwapped = $true
+            Message    = "Likely"
+        }
     }
     else {
-        return "No"
+        return [PSCustomObject]@{
+            WasSwapped = $false
+            Message    = "No"
+        }
     }
 }
 
@@ -4072,6 +4084,27 @@ function Show-UserRecommendedSteps ($Data) {
 		Has-Issue
 	}
 
+	if ($Data.failureMessage -eq 'No valid TPM EK/Platform certificate provided in the TPM identity request message.' -and
+		$Data.MotherboardSwap.WasSwapped -and
+		$Data.IntelBiosInfo.IsIntel -and
+		$Data.CodBroker.Passed
+	) {
+		Log-Output "POSSIBLE ISSUE: Windows appears to have been previously installed on another PC." 'Yellow'
+		Log-Output "-> CONSIDER: Clean Windows Install"
+		Has-Issue
+	}
+
+	if ($Data.CpuInfo.Socket -eq "AM5" -and
+		$Data.MotherboardSwap.WasSwapped -and
+		$Data.OverallPassResult -eq 0 -and
+		$Data.CodBroker.Passed -and
+		-not (Is-NextGenTPM -Data $Data)
+	) {
+		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
+		BIOS_TPM_ResetMessage
+		Has-Issue
+	}
+
     if (!$hasIssues) {
         Log-Output "NA" 'Green'
     }
@@ -4172,7 +4205,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
 	Log-Output "Chipset:      $($Data.ChipsetVersion)"
-	Log-Output "Hardware Swap:$($Data.MotherboardSwap)"
+	Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
     if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
