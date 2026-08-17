@@ -4519,6 +4519,7 @@ function Show-UIOutput ($Data) {
 # =========================================================================
 
 function Invoke-MainExecution {
+	$timer = [System.Diagnostics.Stopwatch]::StartNew()
 	$job = $true
 	if (!$global:isTest){
 		$job = Test-DismHealthAsync
@@ -4621,29 +4622,37 @@ function Invoke-MainExecution {
 
 	write-host "Checking Windows DISM.. May take a minute." -ForegroundColor White
 	if (!$global:isTest) {
-		$timeoutSeconds = 110
-		$timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $timeoutSeconds = 110
+        $dismDeadlineSeconds = $timer.Elapsed.TotalSeconds + $timeoutSeconds
 
-		while ($job.State -eq 'Running' -and $timer.Elapsed.TotalSeconds -lt $timeoutSeconds) {
-			$lastProgress = $job.ChildJobs[0].Progress | Select-Object -Last 1
+        while ($job.State -eq 'Running' -and $timer.Elapsed.TotalSeconds -lt $dismDeadlineSeconds) {
+            $lastProgress = $job.ChildJobs[0].Progress | Select-Object -Last 1
+            $secondsRemaining = [math]::Max(0, [int]($dismDeadlineSeconds - $timer.Elapsed.TotalSeconds))
 
-			if ($lastProgress) {
-				Write-Progress -Activity "Checking Windows DISM" `
-							   -Status $lastProgress.StatusDescription `
-							   -PercentComplete $lastProgress.PercentComplete
-			}
+            $statusText = if ($lastProgress.StatusDescription) {
+                $lastProgress.StatusDescription
+            } else {
+                "Running health check..."
+            }
 
-			Start-Sleep -Milliseconds 500
-		}
-		$timer.Stop()
-		Write-Progress -Activity "Checking Windows DISM" -Completed
+            Write-Progress -Activity "Checking Windows DISM" `
+                           -Status "$statusText (Timeout in ${secondsRemaining}s)" `
+                           -CurrentOperation "Total execution time: $([int]$timer.Elapsed.TotalSeconds)s" `
+                           -PercentComplete ($lastProgress.PercentComplete)
 
-		if ($job.State -eq 'Running') {
-			Stop-Job -Job $job
-			Remove-Job -Job $job
-			$job = "NA"
-		}
-	}
+            Start-Sleep -Milliseconds 500
+        }
+
+        Write-Progress -Activity "Checking Windows DISM" -Completed
+
+        if ($job.State -eq 'Running') {
+            Stop-Job -Job $job
+            Remove-Job -Job $job
+            $job = "NA"
+        }
+    }
+
+	$timer.Stop()
 	$systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
 
     Show-UIOutput -Data $systemData
