@@ -4045,6 +4045,11 @@ function Show-UserRecommendedSteps ($Data) {
 		if ($Data.TestMSI.IsMSI){
 			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
 		}
+
+		if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.Mobo -match "Gigabyte"){
+			Log-Output "-> Gigabyte Aorus Elite: Find 'Pluton fTPM' and change to 'ASF fTPM'." 'Yellow'
+		}
+
 		Has-Issue
     }
 
