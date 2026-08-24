@@ -3735,7 +3735,7 @@ function Show-TpmGuiFormMessage {
             $btnUpload = New-Object System.Windows.Forms.Button -Property @{
                 Location  = New-Object System.Drawing.Point(24, $currentY)
                 Size      = New-Object System.Drawing.Size(550, 44)
-                Text      = "Upload Diagnostic Data for Research"
+                Text      = "Upload Diagnostic Data for Research or Code"
                 Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
                 FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
                 BackColor = [System.Drawing.ColorTranslator]::FromHtml("#0D6EFD")
