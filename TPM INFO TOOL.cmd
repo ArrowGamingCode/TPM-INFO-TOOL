@@ -79,7 +79,7 @@ $syncHash = [hashtable]::Synchronized(@{
     IsGuiReady      = $false
     enableUploadFeature = $true
     IsClosing    = $false
-	WebUrl       = ""
+    WebUrl       = ""
     PCID      = ""
 
     ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
@@ -148,8 +148,8 @@ function Clear-GuiHost {
 }
 
 function Start-TPM-Maintenance {
-	#Read TPM from nvram.
-	Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
+    #Read TPM from nvram.
+    Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
 }
 
 function Step-Progress {
@@ -163,7 +163,7 @@ function Get-CpuCompliance {
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
         $oldAMD = $false
-		$fakeOldAMD = $false
+        $fakeOldAMD = $false
         $isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
 
         $isRyzenAI   = $cpuName -match "Ryzen AI"
@@ -193,18 +193,18 @@ function Get-CpuCompliance {
                 $oldAMD = $true
             }
 
-			$fake3rdGenRegex = '\b(3200G|3400G|3100U|3200U|3250U|3250C|3300U|3500U|3500C|3501U|3550H|3580U|3700U|3700C|3750H|3780U|3000G|300GE|3050U|3050e|3050C|3150U|3150G|3150GE)\b'  
-			if ($cpuName -match $fake3rdGenRegex) {
-				$oldAMD     = $true
-				$fakeOldAMD = $true
-			}
+            $fake3rdGenRegex = '\b(3200G|3400G|3100U|3200U|3250U|3250C|3300U|3500U|3500C|3501U|3550H|3580U|3700U|3700C|3750H|3780U|3000G|300GE|3050U|3050e|3050C|3150U|3150G|3150GE)\b'
+            if ($cpuName -match $fake3rdGenRegex) {
+                $oldAMD     = $true
+                $fakeOldAMD = $true
+            }
         }
 
         return [PSCustomObject]@{
             Name        = $cpu.Name
             Gen         = $genValue
             OldAMD      = $isPassed
-			FakeOldAMD  = $fakeOldAMD
+            FakeOldAMD  = $fakeOldAMD
             Socket      = $cpu.SocketDesignation
             IsAMD       = $isAmd
             IsCoreUltra = $isCoreUltra
@@ -215,7 +215,7 @@ function Get-CpuCompliance {
         return [PSCustomObject]@{
             Name        = "Unknown"
             Gen         = ""
-			FakeOldAMD  = $false
+            FakeOldAMD  = $false
             OldAMD      = $false
             Socket      = "Unknown"
             IsAMD       = $false
@@ -298,7 +298,7 @@ function Get-BiosCompliance {
     return [PSCustomObject]@{
         String = '{0} (Released: {1})' -f $biosObj.SMBIOSBIOSVersion, $dateString
         Passed = $isPassed
-		Release = $dateString
+        Release = $dateString
     }
 }
 
@@ -333,20 +333,20 @@ function Get-SecureBootSetupType {
         if ($null -ne $byteValue) {
             if (1 -eq $byteValue) {
                 return [PSCustomObject]@{
-					Text = "Type (Setup Mode)"
-					Passed = $false
-				}
+                    Text = "Type (Setup Mode)"
+                    Passed = $false
+                }
             } else {
                 return [PSCustomObject]@{
-					Text = "Type (User Mode)"
-					Passed = $true
-				}
+                    Text = "Type (User Mode)"
+                    Passed = $true
+                }
             }
         } else {
             return [PSCustomObject]@{
-				Text = "Type (Unknown - No Data)"
-				Passed = $false
-			}
+                Text = "Type (Unknown - No Data)"
+                Passed = $false
+            }
         }
     } catch {
         return [PSCustomObject]@{
@@ -386,9 +386,9 @@ function Get-SecureBootKeysType {
 }
 
 function Get-OverallPassStatus {
-	param($enrollSuccess, $Data)
-	$criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
-							#(unsure if all system work with this -and $Data.LocalAttest
+    param($enrollSuccess, $Data)
+    $criticalHardwarePass = $Data.TpmInfo.Passed -and $Data.CsmInfo.Passed -and $Data.TpmOwnership.Passed
+                            #(unsure if all system work with this -and $Data.LocalAttest
     return ($enrollSuccess -and $criticalHardwarePass)
 }
 
@@ -589,7 +589,7 @@ function Get-RandgridRegistryAndDriverInfo {
     $allResults = @()
     $foundList  = @()
     $charsList  = @()
-	$md5List    = @()
+    $md5List    = @()
 
     foreach ($platform in $platforms.Keys) {
         $subKeyPath = $platforms[$platform]
@@ -601,7 +601,7 @@ function Get-RandgridRegistryAndDriverInfo {
             FirstChars         = 'N/A'
             ImagePath          = 'N/A'
             RandgridFileExists = $false
-			Md5Hash            = ''
+            Md5Hash            = ''
         }
 
         if ($results.RegKeyExists) {
@@ -609,7 +609,7 @@ function Get-RandgridRegistryAndDriverInfo {
             $imagePath = $regKey.GetValue('ImagePath')
             if ($imagePath) {
                 $results.ImagePath  = $imagePath
-				$results.FirstChars = if ($imagePath.Length -ge 6) { $imagePath.Substring(4,2) } else { $imagePath }
+                $results.FirstChars = if ($imagePath.Length -ge 6) { $imagePath.Substring(4,2) } else { $imagePath }
                 $charsList += $results.FirstChars
 
                 $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
@@ -620,12 +620,12 @@ function Get-RandgridRegistryAndDriverInfo {
 
                 if (Test-Path $cleanPath) {
                     $results.RandgridFileExists = $true
-						try {
-							$hash = (Get-FileHash -Path $cleanPath -Algorithm MD5).Hash.Substring(0, 2)
-							$results.Md5Hash = $hash
-							$md5List += $hash
-						} catch {
-						}
+                        try {
+                            $hash = (Get-FileHash -Path $cleanPath -Algorithm MD5).Hash.Substring(0, 2)
+                            $results.Md5Hash = $hash
+                            $md5List += $hash
+                        } catch {
+                        }
                 }
             }
             $regKey.Close()
@@ -647,7 +647,7 @@ function Get-RandgridRegistryAndDriverInfo {
         'N/A'
     }
 
-	$allMd5sString = if ($md5List.Count -gt 0) {
+    $allMd5sString = if ($md5List.Count -gt 0) {
         ($md5List | Select-Object -Unique) -join ' '
     } else {
         ''
@@ -659,7 +659,7 @@ function Get-RandgridRegistryAndDriverInfo {
         FirstChars         = $allCharsString
         PlatformsFound     = $platformsString
         AllPlatforms       = $allResults
-		AllMd5s            = $allMd5sString
+        AllMd5s            = $allMd5sString
     }
 }
 
@@ -1367,20 +1367,20 @@ function Check-CodBrokerService {
     )
 
     if ($Data.CodBroker -and $Data.CodBroker.StartType -eq 'Disabled') {
-		$result = [System.Windows.Forms.MessageBox]::Show(
-			"COD Broker Service is currently Disabled. Would you like to attempt to repair it now?",
-			"Repair Service",
-			[System.Windows.Forms.MessageBoxButtons]::YesNo,
-			[System.Windows.Forms.MessageBoxIcon]::Question,
-			[System.Windows.Forms.MessageBoxDefaultButton]::Button1,
-			[System.Windows.Forms.MessageBoxOptions]::ServiceNotification
-		)
+        $result = [System.Windows.Forms.MessageBox]::Show(
+            "COD Broker Service is currently Disabled. Would you like to attempt to repair it now?",
+            "Repair Service",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+            [System.Windows.Forms.MessageBoxOptions]::ServiceNotification
+        )
 
-		if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-			try {
-				Set-Service -Name 'COD.Broker.Service' -StartupType Manual -ErrorAction Stop
-			} catch { }
-		}
+        if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+            try {
+                Set-Service -Name 'COD.Broker.Service' -StartupType Manual -ErrorAction Stop
+            } catch { }
+        }
     }
 }
 
@@ -1834,15 +1834,15 @@ function Test-SecurityCompliance {
 
 function Show-TcgAttestationAudit ($Data) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
-	Show-PCR_Message
+    Show-PCR_Message
 
-	if($Data.MeasuredBootCompliance.pass){
-		Log-Output $Data.MeasuredBootCompliance.message 'Green'
-	}else{
-		Log-Output $Data.MeasuredBootCompliance.message 'Yellow'
-	}
+    if($Data.MeasuredBootCompliance.pass){
+        Log-Output $Data.MeasuredBootCompliance.message 'Green'
+    }else{
+        Log-Output $Data.MeasuredBootCompliance.message 'Yellow'
+    }
 
-	Log-Output "DBX: Recent: $($Data.ScoreRecentShims) All: $($Data.ScoreShims)" 'White'
+    Log-Output "DBX: Recent: $($Data.ScoreRecentShims) All: $($Data.ScoreShims)" 'White'
 }
 
 function Test-ODCA {
@@ -1875,7 +1875,7 @@ function Test-ODCA {
         return $null
     }
 
-	$isCSMETGLPTT01SVN = [bool]($foundCerts | Where-Object { $_.Subject -like "*CN=CSME TGL PTT*01SVN*" })
+    $isCSMETGLPTT01SVN = [bool]($foundCerts | Where-Object { $_.Subject -like "*CN=CSME TGL PTT*01SVN*" })
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     foreach ($cert in $foundCerts) {
@@ -1923,7 +1923,7 @@ function Test-ODCA {
             AKI        = $akiVal
             IsMatch    = $isMatch
             FoundRole  = $role
-			isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
+            isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
         })
     }
 
@@ -1964,7 +1964,7 @@ function Get-TpmEkChainInfo {
     $allChainResults = [System.Collections.Generic.List[PSCustomObject]]::new()
     $keyFound = $false
     $foundRole = "None"
-	$isCSMETGLPTT01SVN = $false
+    $isCSMETGLPTT01SVN = $false
 
     foreach ($leafCert in $leafCerts) {
         $chainEngine = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
@@ -2060,9 +2060,9 @@ function Get-TpmEkChainInfo {
         $regResults = Test-ODCA -Key $searchKey
         if ($regResults) {
             foreach ($regItem in $regResults) {
-				if ($regItem.isCSMETGLPTT01SVN) {
-					$isCSMETGLPTT01SVN = $true
-				}
+                if ($regItem.isCSMETGLPTT01SVN) {
+                    $isCSMETGLPTT01SVN = $true
+                }
 
                 $allChainResults.Add([PSCustomObject]@{
                     Role    = $regItem.Role
@@ -2087,7 +2087,7 @@ function Get-TpmEkChainInfo {
         MatchingRole   = $foundRole
         ChainDetails   = $allChainResults
         IsIntermediate = $isIntermediate
-		isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
+        isCSMETGLPTT01SVN = $isCSMETGLPTT01SVN
     }
 }
 
@@ -2252,8 +2252,8 @@ function Get-UacStatus {
 }
 
 function Get-CertreqAttestation($Data) {
-	Write-GuiHost "Testing Certreq.." -ForegroundColor White
-	if ($global:isTest) {
+    Write-GuiHost "Testing Certreq.." -ForegroundColor White
+    if ($global:isTest) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
         $oldCulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
@@ -2265,57 +2265,57 @@ function Get-CertreqAttestation($Data) {
             [System.Threading.Thread]::CurrentThread.CurrentUICulture = $oldCulture
         }
     }
-	Set-GuiProgress -Activity "Loading System Diagnostics" -Completed
+    Set-GuiProgress -Activity "Loading System Diagnostics" -Completed
 
     $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
-	$enrollSuccess = $certRaw -match $successPatterns
-	if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
+    $enrollSuccess = $certRaw -match $successPatterns
+    if ($certRaw -match "Bad Request" -or $certRaw -match "No valid TPM EK") {
         $enrollSuccess = $false
     }
 
-	$nameResolutionFailure = $certRaw -match "The server name or address could not be resolved"
-	$failureType1 = $certRaw -match "1168 ERROR_NOT_FOUND"
-	$serverOverload = $certRaw -match "Too Many Requests"
+    $nameResolutionFailure = $certRaw -match "The server name or address could not be resolved"
+    $failureType1 = $certRaw -match "1168 ERROR_NOT_FOUND"
+    $serverOverload = $certRaw -match "Too Many Requests"
 
-	$failureMessage = ""
-	if($failureType1){
-		$failureMessage = "[FAIL] CertReq - registry issue?"
-	}
-	if($serverOverload ){
-		$failureMessage = "[FAIL] Server Overloaded - Please run again"
-	}
+    $failureMessage = ""
+    if($failureType1){
+        $failureMessage = "[FAIL] CertReq - registry issue?"
+    }
+    if($serverOverload ){
+        $failureMessage = "[FAIL] Server Overloaded - Please run again"
+    }
 
-	$IsOverallAIKPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
+    $IsOverallAIKPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
 
-	if ($IsOverallAIKPass) {
-		$OverallPassResult = 1;
-	}else{
-		$OverallPassResult = 0;
+    if ($IsOverallAIKPass) {
+        $OverallPassResult = 1;
+    }else{
+        $OverallPassResult = 0;
 
-		if (Is-NextGenTPM -Data $Data) {
-			$OverallPassResult = 2;
-		}
+        if (Is-NextGenTPM -Data $Data) {
+            $OverallPassResult = 2;
+        }
 
-		if($serverOverload){
-			$OverallPassResult = 2;
-		}
-	}
+        if($serverOverload){
+            $OverallPassResult = 2;
+        }
+    }
 
-	#$OverallPassResult = 2;
+    #$OverallPassResult = 2;
 
-	$keyID = $false
-	if ($certRaw -match 'KeyId[-=:]\s*(?<id>[A-Fa-f0-9]{32,})') {
-		$keyID = $Matches['id']
-	}
+    $keyID = $false
+    if ($certRaw -match 'KeyId[-=:]\s*(?<id>[A-Fa-f0-9]{32,})') {
+        $keyID = $Matches['id']
+    }
 
     return [PSCustomObject]@{
         CertRaw               = $certRaw
         OverallPassResult     = $OverallPassResult
-		IsOverallAIKPass      = $IsOverallAIKPass;
-		EnrollSuccess         = $enrollSuccess
-		NameResolutionFailure = $nameResolutionFailure
-		FailureMessage        = $failureMessage
-		KeyID                 = $keyID
+        IsOverallAIKPass      = $IsOverallAIKPass;
+        EnrollSuccess         = $enrollSuccess
+        NameResolutionFailure = $nameResolutionFailure
+        FailureMessage        = $failureMessage
+        KeyID                 = $keyID
     }
 }
 
@@ -2329,18 +2329,18 @@ function Is-NextGenTPM {
         return $true
     }
 
-	if ($Data.TpmOwnership.ManufacturerIdTxt -eq "MSFT") {
-		return $true
+    if ($Data.TpmOwnership.ManufacturerIdTxt -eq "MSFT") {
+        return $true
     }
 
-	if ($Data.CpuInfo.IsCoreUltra) {
-		return $true
+    if ($Data.CpuInfo.IsCoreUltra) {
+        return $true
     }
 
-	if ($Data.CpuInfo.IsRyzenAI) {
-		if (-not $data.HasEK) {
-			return $true
-		}
+    if ($Data.CpuInfo.IsRyzenAI) {
+        if (-not $data.HasEK) {
+            return $true
+        }
     }
 
     return $false
@@ -2365,9 +2365,9 @@ function Compare-TpmKeyId {
         [string]$tpmKeyId
     )
 
-	if ($certData -match '-KeyId-([a-f0-9]+)') {
-		$certKeyId = $Matches[1]
-	}
+    if ($certData -match '-KeyId-([a-f0-9]+)') {
+        $certKeyId = $Matches[1]
+    }
 
     if ($certKeyId -eq $tpmKeyId) {
         return $true
@@ -2457,9 +2457,9 @@ function Get-AgesaVersion {
 }
 
 function BIOS_TPM_ResetMessage {
-	Log-Output "Reset the TPM from the BIOS. Look for 'Pending Operation'."
-	Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
-	Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
+    Log-Output "Reset the TPM from the BIOS. Look for 'Pending Operation'."
+    Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
+    Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
 }
 
 function Get-LatestUpdatesSummary {
@@ -2767,9 +2767,9 @@ function Test-DismHealthAsync {
 }
 
 function Display-DismMessage {
-	Write-GuiHost "========================================================================="
-	Write-GuiHost "Waiting for DISM.."
-	Write-GuiHost "========================================================================="
+    Write-GuiHost "========================================================================="
+    Write-GuiHost "Waiting for DISM.."
+    Write-GuiHost "========================================================================="
 }
 
 # =========================================================================
@@ -2793,13 +2793,13 @@ function Show-FixMenu {
     Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
     Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
     Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
-	Write-Host "3) Delete Activision Key"                         -ForegroundColor White
-	Write-Host "4) Print PCR Table"                               -ForegroundColor White
-	Write-Host "5) Print DBX Table"                               -ForegroundColor White
-	Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
-	Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
-	Write-Host "8) View Intermediate Cert Details"                -ForegroundColor White
-	Write-Host "9) Intel CSME check"                              -ForegroundColor White
+    Write-Host "3) Delete Activision Key"                         -ForegroundColor White
+    Write-Host "4) Print PCR Table"                               -ForegroundColor White
+    Write-Host "5) Print DBX Table"                               -ForegroundColor White
+    Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
+    Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
+    Write-Host "8) View Intermediate Cert Details"                -ForegroundColor White
+    Write-Host "9) Intel CSME check"                              -ForegroundColor White
 
     Write-Host "Q) Quit"                                          -ForegroundColor Red
     Write-Host "============================================="    -ForegroundColor Cyan
@@ -2819,34 +2819,34 @@ function Show-FixMenu {
         }
         "4" {
             Print-PCRTable
-			pause
-			Show-FixMenu
+            pause
+            Show-FixMenu
         }
         "5" {
             Print-DBX | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap
-			pause
-			Show-FixMenu
+            pause
+            Show-FixMenu
         }
         "6" {
             DISM /Online /Cleanup-Image /RestoreHealth
-			pause
-			Show-FixMenu
+            pause
+            Show-FixMenu
         }
         "7" {
             ViewWindowsComponentRepairedIssues -LogTarget 'Log-Output'
-			pause
-			Show-FixMenu
+            pause
+            Show-FixMenu
         }
         "8" {
             Get-RegIntermediateCerts -LogTarget Log-Output
-			pause
-			Show-FixMenu
+            pause
+            Show-FixMenu
         }
         "9" {
             Show-FixMenu -Message "CSME: $(Get-IntelCsmeStatus)"
         }
         "Q" {
-			cls
+            cls
             exit
         }
 
@@ -2885,34 +2885,34 @@ function ViewWindowsComponentRepairedIssues {
 }
 
 function Reset-WindowsCache {
-	$Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
-	$Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
-	if (Test-Path $Path1) {
-		Remove-Item -Path $Path1 -Recurse -Force
-	}
-	if (Test-Path $Path2) {
-		Remove-Item -Path $Path2 -Recurse -Force
-	}
+    $Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
+    $Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
+    if (Test-Path $Path1) {
+        Remove-Item -Path $Path1 -Recurse -Force
+    }
+    if (Test-Path $Path2) {
+        Remove-Item -Path $Path2 -Recurse -Force
+    }
 
-	certutil -urlcache * delete
-	Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
-	Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
-	Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
-	Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+    certutil -urlcache * delete
+    Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
 
-	Start-TPM-Maintenance
+    Start-TPM-Maintenance
 
-	for ($i = 10; $i -gt 0; $i--) {
-		Write-Host "`nWaiting for TPM maintenance... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
-		Start-Sleep -Seconds 1
-	}
+    for ($i = 10; $i -gt 0; $i--) {
+        Write-Host "`nWaiting for TPM maintenance... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
+        Start-Sleep -Seconds 1
+    }
 
-	Set-GuiProgress -Activity "Waiting" -Completed
-	Write-Host "`nenrollaik.."
-	certreq -q -enrollaik -f -config '""'
-	certutil -pulse
+    Set-GuiProgress -Activity "Waiting" -Completed
+    Write-Host "`nenrollaik.."
+    certreq -q -enrollaik -f -config '""'
+    certutil -pulse
 
-	Write-Host "Actioned" -ForegroundColor Green
+    Write-Host "Actioned" -ForegroundColor Green
 }
 
 function Set-SecureBoot2023Certificates {
@@ -2971,7 +2971,7 @@ function Set-SecureBoot2023Certificates {
     } catch {
         Write-Error "Execution failed to push keys to staging: $_"
     }
-	pause
+    pause
 }
 
 function Reset-ActivisionKey {
@@ -3110,9 +3110,6 @@ function Get-IntelCsmeStatus {
     return "NA"
 }
 
-
-
-
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -3147,10 +3144,10 @@ function Print-PCRTable {
 
 function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
     if ($NoNewLine) {
-		Write-GuiHost $Text  -ForegroundColor $Color -NoNewline
+        Write-GuiHost $Text  -ForegroundColor $Color -NoNewline
         $global:ClipboardBuffer += $Text
     } else {
-		Write-GuiHost $Text -ForegroundColor $Color
+        Write-GuiHost $Text -ForegroundColor $Color
         $global:ClipboardBuffer += "$Text`r`n"
     }
 
@@ -3213,7 +3210,7 @@ function Set-GuiProgress {
 function Show-PCR_Message() {
     $HasFailures = $false
     $FailedRegisters = [System.Collections.Generic.List[string]]::new()
-	$MatchCount = 0
+    $MatchCount = 0
 
     Get-PCR | ForEach-Object {
 
@@ -3229,22 +3226,22 @@ function Show-PCR_Message() {
                 Log-Output $CleanedLine 'White'
             }
 
-			if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
-				$MatchCount++
-			}
+            if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
+                $MatchCount++
+            }
         }
     }
 
-	if($MatchCount -eq 0){
-	    Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
-		$global:HasPCRFailures = $true
-	}elseif (-not $HasFailures) {
+    if($MatchCount -eq 0){
+        Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
+        $global:HasPCRFailures = $true
+    }elseif (-not $HasFailures) {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers." 'Green'
     } else {
         Log-Output "[FAIL] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'Red'
-		Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
+        Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
-		$global:HasPCRFailures = $true
+        $global:HasPCRFailures = $true
     }
 }
 
@@ -3888,82 +3885,82 @@ $guiScript = {
         }
     }
 
-	function Submit-ResearchData {
-		param(
-			[Parameter(Mandatory=$true)]
-			[System.Windows.Forms.Button]$Button,
+    function Submit-ResearchData {
+        param(
+            [Parameter(Mandatory=$true)]
+            [System.Windows.Forms.Button]$Button,
 
-			[Parameter(Mandatory=$true)]
-			[hashtable]$SyncHash
-		)
+            [Parameter(Mandatory=$true)]
+            [hashtable]$SyncHash
+        )
 
-		try {
-			$msgResponse = [System.Windows.Forms.MessageBox]::Show(
-				"Can you launch/play Call of Duty without attestation errors?",
-				"Research Verification",
-				[System.Windows.Forms.MessageBoxButtons]::YesNo,
-				[System.Windows.Forms.MessageBoxIcon]::Question
-			)
+        try {
+            $msgResponse = [System.Windows.Forms.MessageBox]::Show(
+                "Can you launch/play Call of Duty without attestation errors?",
+                "Research Verification",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
 
-			$doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
+            $doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
 
-			$machineHash = $SyncHash.PCID
+            $machineHash = $SyncHash.PCID
 
-			if ([string]::IsNullOrWhiteSpace($machineHash)) {
-				throw "Get-PC-ID returned null or empty string."
-			}
+            if ([string]::IsNullOrWhiteSpace($machineHash)) {
+                throw "Get-PC-ID returned null or empty string."
+            }
 
-			if ($machineHash.Length -lt 7) {
-				throw "Get-PC-ID returned string shorter than 7 characters: '$machineHash'"
-			}
+            if ($machineHash.Length -lt 7) {
+                throw "Get-PC-ID returned string shorter than 7 characters: '$machineHash'"
+            }
 
-			$formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
+            $formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
 
-			$Button.Text      = "Code: $formattedId"
-			$Button.BackColor = [System.Drawing.Color]::Transparent
-			$Button.Enabled   = $false
-			$Button.Font = New-Object System.Drawing.Font($Button.Font.FontFamily, 14, [System.Drawing.FontStyle]::Bold)
-			$Button.ForeColor = $blueBtn
+            $Button.Text      = "Code: $formattedId"
+            $Button.BackColor = [System.Drawing.Color]::Transparent
+            $Button.Enabled   = $false
+            $Button.Font = New-Object System.Drawing.Font($Button.Font.FontFamily, 14, [System.Drawing.FontStyle]::Bold)
+            $Button.ForeColor = $blueBtn
 
-			$Button.Refresh()
-			[System.Windows.Forms.Application]::DoEvents()
+            $Button.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
 
-			$bufferText   = ($SyncHash.ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
-			$bufferData   = ($SyncHash.DataBuffer  | ForEach-Object { $_.Text }) -join "`r`n"
-			$combinedText = $bufferText + "`r`n" + $bufferData
+            $bufferText   = ($SyncHash.ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+            $bufferData   = ($SyncHash.DataBuffer  | ForEach-Object { $_.Text }) -join "`r`n"
+            $combinedText = $bufferText + "`r`n" + $bufferData
 
-			$ms     = New-Object System.IO.MemoryStream
-			$gzip   = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress, $true)
-			$writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
+            $ms     = New-Object System.IO.MemoryStream
+            $gzip   = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress, $true)
+            $writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
 
-			$writer.Write($combinedText)
-			$writer.Flush()
-			$writer.Dispose()
-			$gzip.Dispose()
+            $writer.Write($combinedText)
+            $writer.Flush()
+            $writer.Dispose()
+            $gzip.Dispose()
 
-			$compressedBytes = $ms.ToArray()
-			$ms.Dispose()
+            $compressedBytes = $ms.ToArray()
+            $ms.Dispose()
 
-			$compressedData = [Convert]::ToBase64String($compressedBytes)
+            $compressedData = [Convert]::ToBase64String($compressedBytes)
 
-			$apiUrl = $SyncHash.WebUrl
+            $apiUrl = $SyncHash.WebUrl
 
-			$body = @{
-				powershell_data = $compressedData
-				id              = $machineHash
-				doesCODwork     = $doesCodWork
-			}
+            $body = @{
+                powershell_data = $compressedData
+                id              = $machineHash
+                doesCODwork     = $doesCodWork
+            }
 
-			$response = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -TimeoutSec 15 -ErrorAction Stop
+            $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -TimeoutSec 15 -ErrorAction Stop
 
-			return $response
+            return $response
 
-		} catch {
-			Write-Error "Failed to submit data"
-			$Button.Text    = "Error Submitting"
-			$Button.Enabled = $false
-		}
-	}
+        } catch {
+            Write-Error "Failed to submit data"
+            $Button.Text    = "Error Submitting"
+            $Button.Enabled = $false
+        }
+    }
 
     $bgColor        = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
     $cardBgColor    = [System.Drawing.Color]::White
@@ -4211,44 +4208,44 @@ function Show-UserRecommendedSteps ($Data) {
     Log-Output "`n--- USER RECOMMENDED STEPS ---" 'Cyan'
     $hasIssues = $false
 
-	function Has-Issue {
-		Set-Variable -Name 'hasIssues' -Value $true -Scope 1
-		Log-Output ""
-	}
+    function Has-Issue {
+        Set-Variable -Name 'hasIssues' -Value $true -Scope 1
+        Log-Output ""
+    }
 
     if ($Data.CpuInfo.OldAMD) {
         Log-Output "[WARNING] Incompatible CPU detected" 'Yellow'
 
-		if ($Data.CpuInfo.FakeOldAMD) {
-			Log-Output "CPU is branded as 3rd gen, but is really a 2nd gen." 'Yellow'
-		}
+        if ($Data.CpuInfo.FakeOldAMD) {
+            Log-Output "CPU is branded as 3rd gen, but is really a 2nd gen." 'Yellow'
+        }
 
-		Log-Output "-> Please manually confirm your CPU is not a 1st or 2nd gen Ryzen, as these CPUs do not support TPM Attestation." 'Yellow'
-		Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 4th gen or later." 'Yellow'
-		Log-Output "-> (Most 3rd Gens work, but best to get 4th)" 'Yellow'
+        Log-Output "-> Please manually confirm your CPU is not a 1st or 2nd gen Ryzen, as these CPUs do not support TPM Attestation." 'Yellow'
+        Log-Output "-> FIX: You will need to upgrade your CPU to a Ryzen 4th gen or later." 'Yellow'
+        Log-Output "-> (Most 3rd Gens work, but best to get 4th)" 'Yellow'
         Has-Issue
     }
 
-	if ($Data.TpmInfo.AmdFixRequired) {
+    if ($Data.TpmInfo.AmdFixRequired) {
         if ($Data.BitLocker -and $Data.BitLocker.Passed -eq $false) {
             Log-Output "Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. (press Windows Key + R, type 'tpm.msc', hit Enter, and click 'Clear TPM')" 'Yellow'
         } else {
-			Log-Output "BitLocker is active, you MUST save your Recovery Key BEFORE updating or clearing the TPM to avoid being locked out." 'Red'
+            Log-Output "BitLocker is active, you MUST save your Recovery Key BEFORE updating or clearing the TPM to avoid being locked out." 'Red'
             Log-Output "Your current AMD TPM firmware version requires an update. If you have done this, you may need to reset/clear the TPM keys. " 'Yellow'
         }
         Has-Issue
     }
 
-	if (!$Data.SecureBoot.Passed) {
-		Log-Output "SECURE BOOT is OFF: Please turn it on.`n" 'Yellow'
-		Log-Output "-> If you have secure boot enabled, but Windows still says it's disabled:" 'Yellow'
-		Log-Output "-> Explain: Windows 11 requires secure boot capable, but does not force it to be used." 'Yellow'
-		Log-Output "-> Confirm CSM (Compatibility Support Module) is disabled in BIOS." 'Yellow'
-		Log-Output "-> Then set Secure Boot Mode from Custom or Standard to Custom. Save and reboot." 'Yellow'
-		Log-Output "-> Then change Secure Boot Mode from Custom back to Standard. Save and Reboot." 'Yellow'
+    if (!$Data.SecureBoot.Passed) {
+        Log-Output "SECURE BOOT is OFF: Please turn it on.`n" 'Yellow'
+        Log-Output "-> If you have secure boot enabled, but Windows still says it's disabled:" 'Yellow'
+        Log-Output "-> Explain: Windows 11 requires secure boot capable, but does not force it to be used." 'Yellow'
+        Log-Output "-> Confirm CSM (Compatibility Support Module) is disabled in BIOS." 'Yellow'
+        Log-Output "-> Then set Secure Boot Mode from Custom or Standard to Custom. Save and reboot." 'Yellow'
+        Log-Output "-> Then change Secure Boot Mode from Custom back to Standard. Save and Reboot." 'Yellow'
 
-		Has-Issue
-	}
+        Has-Issue
+    }
 
     if (!$Data.CsmInfo.Passed) {
         Log-Output "Your system is running in Legacy/CSM mode instead of modern UEFI mode." 'Yellow'
@@ -4256,116 +4253,116 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if (!$Data.BiosInfo.Passed) {
-		if ($Data.CpuInfo.Socket -eq "AM4" -and $Data.TpmInfo.AmdFixRequired) {
-			Log-Output "ALL AM4 systems need a BIOS update after ~August 2025. Check if there is a newer BIOS" 'Yellow'
-			Log-Output "Your BIOS is from: $($Data.BiosInfo.Release)" 'Yellow'
-		} else {
-			Log-Output "Check if there is a newer BIOS" 'Yellow'
-		}
+        if ($Data.CpuInfo.Socket -eq "AM4" -and $Data.TpmInfo.AmdFixRequired) {
+            Log-Output "ALL AM4 systems need a BIOS update after ~August 2025. Check if there is a newer BIOS" 'Yellow'
+            Log-Output "Your BIOS is from: $($Data.BiosInfo.Release)" 'Yellow'
+        } else {
+            Log-Output "Check if there is a newer BIOS" 'Yellow'
+        }
         Has-Issue
     }
 
-	if ($Data.IntelBiosInfo.IsIntel -and $Data.IntelBiosInfo.RequiresFirmwareUpdate) {
+    if ($Data.IntelBiosInfo.IsIntel -and $Data.IntelBiosInfo.RequiresFirmwareUpdate) {
         Log-Output "Your Intel PTT Firmware version ($($Data.IntelBiosInfo.Version)) appears to be outdated. Update BIOS/Firmware" 'Yellow'
         Has-Issue
     }
 
-	if (!$Data.CompatibilityFlags.Passed) {
+    if (!$Data.CompatibilityFlags.Passed) {
         Log-Output "COD is intended to run without any compatibility or admin flags." 'Yellow'
         Has-Issue
     }
 
-	if ($Data.doesThirdPartySecurityExist.Passed -and $Data.OverallPassResult -eq 1) {
+    if ($Data.doesThirdPartySecurityExist.Passed -and $Data.OverallPassResult -eq 1) {
         Log-Output "[WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "-> WHY: Aggressive third-party security software can block CoD." 'Yellow'
-		Log-Output "-> WHEN: If you have problems."
+        Log-Output "-> WHEN: If you have problems."
         Log-Output "-> HOW TO FIX: Whitelist CoD. [cod.exe, CODBrokerInstaller.exe, CODBrokerService.exe]" 'White'
         Has-Issue
     }
 
-	if (!$Data.CodBroker.Passed) {
+    if (!$Data.CodBroker.Passed) {
         Log-Output "[FIX REQUIRED] The COD Broker Service is broken" 'Red'
         Has-Issue
     }
 
-	if ($Data.SecureBoot.Passed -and !$Data.SecureBootType.Passed) {
+    if ($Data.SecureBoot.Passed -and !$Data.SecureBootType.Passed) {
         Log-Output "WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
         Log-Output "-> [WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
         Log-Output "-> [HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
         Has-Issue
     }
 
-	if ($Data.Pluton -and -not $Data.OverallPassResult -eq 1) {
+    if ($Data.Pluton -and -not $Data.OverallPassResult -eq 1) {
         Log-Output "[WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
-		Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
+        Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
 
-		if ($Data.TestMSI.IsMSI){
-			Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
-		}
+        if ($Data.TestMSI.IsMSI){
+            Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
+        }
 
-		if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.Mobo -match "Gigabyte"){
-			Log-Output "-> Gigabyte Aorus Elite: Find 'Pluton fTPM' and change to 'ASF fTPM'." 'Yellow'
-		}
+        if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.Mobo -match "Gigabyte"){
+            Log-Output "-> Gigabyte Aorus Elite: Find 'Pluton fTPM' and change to 'ASF fTPM'." 'Yellow'
+        }
 
-		Has-Issue
-    }
-
-	if ($Data.NameResolutionFailure) {
-		Log-Output "Cannot connect to the cloud attestation server. Firewall or ISP may be blocking certreq" 'Red'
-		Log-Output "-> Check you have internet" 'Red'
-		Has-Issue
-	}
-
-	if (!$Data.MicrosoftCa.Passed) {
-		Log-Output "[WARNING] Windows UEFI CA 2023 not found"  'Yellow'
-		Log-Output "-> COD MAY need this updated. However, irrespective of COD, its best practice to have this."
-		Has-Issue
-	}
-
-    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) -and $Data.CodBroker.Passed) {
-		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
-		BIOS_TPM_ResetMessage
         Has-Issue
     }
 
-	if($Data.UefiGrubShimEntry -and $global:HasPCRFailures){
-		Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
-		Has-Issue
-	}
+    if ($Data.NameResolutionFailure) {
+        Log-Output "Cannot connect to the cloud attestation server. Firewall or ISP may be blocking certreq" 'Red'
+        Log-Output "-> Check you have internet" 'Red'
+        Has-Issue
+    }
 
-	if(!$Data.IsWindowsBootFirst){
-		Log-Output "Windows Boot Manager is not the first to boot. Grub?" 'Red'
-		Log-Output "-> (Be careful): bcdedit /set {fwbootmgr} displayorder {bootmgr} /addfirst"
-		Has-Issue
-	}
+    if (!$Data.MicrosoftCa.Passed) {
+        Log-Output "[WARNING] Windows UEFI CA 2023 not found"  'Yellow'
+        Log-Output "-> COD MAY need this updated. However, irrespective of COD, its best practice to have this."
+        Has-Issue
+    }
 
-	if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($global:HasPCRFailures) ) {
-		Log-Output "PCR MISMATCH'." 'Yellow'
-		Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
-		Log-Output "-> Change:Secure Boot Security Mode From: Standard To: Custom > Maximum Security"
-		Has-Issue
-	}
+    if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) -and $Data.CodBroker.Passed) {
+        Log-Output "Potential TPM 'state mismatch'." 'Yellow'
+        BIOS_TPM_ResetMessage
+        Has-Issue
+    }
 
-	if ($Data.failureMessage -eq 'No valid TPM EK/Platform certificate provided in the TPM identity request message.' -and
-		$Data.MotherboardSwap.WasSwapped -and
-		$Data.IntelBiosInfo.IsIntel -and
-		$Data.CodBroker.Passed
-	) {
-		Log-Output "POSSIBLE ISSUE: Windows appears to have been previously installed on another PC." 'Yellow'
-		Log-Output "-> CONSIDER: Clean Windows Install"
-		Has-Issue
-	}
+    if($Data.UefiGrubShimEntry -and $global:HasPCRFailures){
+        Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
+        Has-Issue
+    }
 
-	if ($Data.CpuInfo.Socket -eq "AM5" -and
-		$Data.MotherboardSwap.WasSwapped -and
-		$Data.OverallPassResult -eq 0 -and
-		$Data.CodBroker.Passed -and
-		-not (Is-NextGenTPM -Data $Data)
-	) {
-		Log-Output "Potential TPM 'state mismatch'." 'Yellow'
-		BIOS_TPM_ResetMessage
-		Has-Issue
-	}
+    if(!$Data.IsWindowsBootFirst){
+        Log-Output "Windows Boot Manager is not the first to boot. Grub?" 'Red'
+        Log-Output "-> (Be careful): bcdedit /set {fwbootmgr} displayorder {bootmgr} /addfirst"
+        Has-Issue
+    }
+
+    if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($global:HasPCRFailures) ) {
+        Log-Output "PCR MISMATCH'." 'Yellow'
+        Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
+        Log-Output "-> Change:Secure Boot Security Mode From: Standard To: Custom > Maximum Security"
+        Has-Issue
+    }
+
+    if ($Data.failureMessage -eq 'No valid TPM EK/Platform certificate provided in the TPM identity request message.' -and
+        $Data.MotherboardSwap.WasSwapped -and
+        $Data.IntelBiosInfo.IsIntel -and
+        $Data.CodBroker.Passed
+    ) {
+        Log-Output "POSSIBLE ISSUE: Windows appears to have been previously installed on another PC." 'Yellow'
+        Log-Output "-> CONSIDER: Clean Windows Install"
+        Has-Issue
+    }
+
+    if ($Data.CpuInfo.Socket -eq "AM5" -and
+        $Data.MotherboardSwap.WasSwapped -and
+        $Data.OverallPassResult -eq 0 -and
+        $Data.CodBroker.Passed -and
+        -not (Is-NextGenTPM -Data $Data)
+    ) {
+        Log-Output "Potential TPM 'state mismatch'." 'Yellow'
+        BIOS_TPM_ResetMessage
+        Has-Issue
+    }
 
     if (!$hasIssues) {
         Log-Output "NA" 'Green'
@@ -4385,7 +4382,7 @@ function Show-Banner {
         [switch]$ConsoleOnly
     )
 
-	$LogCmd = if ($ConsoleOnly) {
+    $LogCmd = if ($ConsoleOnly) {
         { Write-GuiHost $args[0] -ForegroundColor $args[1] }
     } else {
         { Log-Output -Text $args[0] -Color $args[1] }
@@ -4403,7 +4400,7 @@ function Show-Banner {
         $statusText = "UNKNOWN"
         $color      = "Yellow"
         $padding    = " " * 17
-	}
+    }
 
     &$LogCmd "=======================================================================" 'Cyan'
     &$LogCmd "| $padding [ OVERALL: TPM Attestation $statusText ] $padding |" $color
@@ -4416,39 +4413,39 @@ function PrintLargeOverallResult ($result) {
 
     if ($result -eq 'PASS') {
         $ascii = @'
-  ____    _    ____ ____  
- |  _ \  / \  / ___/ ___| 
- | |_) |/ _ \ \___ \___ \ 
+  ____    _    ____ ____
+ |  _ \  / \  / ___/ ___|
+ | |_) |/ _ \ \___ \___ \
  |  __/ ___ \ ___) |___) |
- |_| /_/   \_\____/|____/ 
+ |_| /_/   \_\____/|____/
 '@
         Write-GuiHost $ascii -ForegroundColor Green
 
     } elseif ($result -eq 'FAIL') {
         $ascii = @'
-  _____ _   ___ _     
- |  ___/ \ |_ _| |    
- | |_ / _ \ | || |    
- |  _/ ___ \| || |___ 
+  _____ _   ___ _
+ |  ___/ \ |_ _| |
+ | |_ / _ \ | || |
+ |  _/ ___ \| || |___
  |_|/_/   \_\___|_____|
 '@
         Write-GuiHost $ascii -ForegroundColor Red
 
-	} elseif ($result -eq 'UNKNOWN') {
-		$ascii = @'
- _   _ _   _ _  ___   _  _____        _   _ 
+    } elseif ($result -eq 'UNKNOWN') {
+        $ascii = @'
+ _   _ _   _ _  ___   _  _____        _   _
 | | | | \ | | |/ / \ | |/ _ \ \      / / | \ | |
 | | | |  \| | ' /|  \| | | | \ \ /\ / /  |  \| |
 | |_| | |\  | . \| |\  | |_| |\ V  V /   | |\  |
  \___/|_| \_|_|\_\_| \_|\___/  \_/\_/    |_| \_|
 '@
 
-		Write-GuiHost $ascii -ForegroundColor Yellow
-	}
+        Write-GuiHost $ascii -ForegroundColor Yellow
+    }
 }
 
 function Show-UIOutput ($Data) {
-	Clear-GuiHost
+    Clear-GuiHost
 
     Show-Banner -OverallPassResult $Data.OverallPassResult -ConsoleOnly
 
@@ -4456,18 +4453,18 @@ function Show-UIOutput ($Data) {
     Log-Output '--- HARDWARE SPECIFICATIONS ---' 'Cyan'
     Log-Output "OS:           $($Data.currentOS) ($($Data.OSSubVersion)) - (Original Install: $($Data.OriginalOSBuild)) - Supported: $($Data.OSSupported)"
     Log-Output "CPU:          $($Data.CpuInfo.Name) $($Data.CpuInfo.Gen)"
-	Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
-	Log-Output "PC Model:     $($Data.PcModel)"
+    Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
+    Log-Output "PC Model:     $($Data.PcModel)"
     Log-Output "Motherboard:  $($Data.Mobo)"
     Log-Output "BIOS:         $($Data.BiosInfo.String)"
-	if ($Data.AgesaVersion) {
-		Log-Output "Agesa:        $($Data.AgesaVersion)"
-	}
-	Log-Output "RAM Type:     $($Data.RamSlots)"
+    if ($Data.AgesaVersion) {
+        Log-Output "Agesa:        $($Data.AgesaVersion)"
+    }
+    Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
-	Log-Output "Chipset:      $($Data.ChipsetVersion)"
-	Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
+    Log-Output "Chipset:      $($Data.ChipsetVersion)"
+    Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
     if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
@@ -4483,11 +4480,11 @@ function Show-UIOutput ($Data) {
         Log-Output 'CRITICAL: Bad TPM version. Bios update or key reset required' 'Red'
     }
 
-	if ($Data.SecureBoot.Passed -and $Data.SecureBootType.Passed) {
-		Log-Output "RESULT: Secure Boot: $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Green'
-	} else {
-		Log-Output "WARNING: Secure Boot is not enabled. $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Red'
-	}
+    if ($Data.SecureBoot.Passed -and $Data.SecureBootType.Passed) {
+        Log-Output "RESULT: Secure Boot: $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Green'
+    } else {
+        Log-Output "WARNING: Secure Boot is not enabled. $($Data.SecureBoot.Text) - $($Data.SecureBootType.Text)" 'Red'
+    }
 
     if ($Data.CsmInfo.Passed) {
         Log-Output "RESULT: BIOS Boot Mode Pass ($($Data.CsmInfo.Text))" 'Green'
@@ -4505,32 +4502,32 @@ function Show-UIOutput ($Data) {
         Log-Output "Local Attestation: FAILED / NOT SUPPORTED" 'Red'
     }
 
-	if ($Data.CodBroker.StartType -eq 'Automatic') {
-		Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
-	} elseif ($Data.CodBroker.Passed) {
-		Log-Output 'RESULT: COD Broker Service Pass' 'Green'
-	} else {
-		Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
-	}
-	Print-CodBrokerCycleStatus -CycleResult $Data.CodBrokerCycleStatus
+    if ($Data.CodBroker.StartType -eq 'Automatic') {
+        Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
+    } elseif ($Data.CodBroker.Passed) {
+        Log-Output 'RESULT: COD Broker Service Pass' 'Green'
+    } else {
+        Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
+    }
+    Print-CodBrokerCycleStatus -CycleResult $Data.CodBrokerCycleStatus
 
-	if ($Data.BrokerExe) {
-		Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$($Data.BrokerExe.Version)) [$($Data.BrokerExe.MD5ShortHex)] (Pass)" 'Green'
-	} else {
-		Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow'
-	}
+    if ($Data.BrokerExe) {
+        Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$($Data.BrokerExe.Version)) [$($Data.BrokerExe.MD5ShortHex)] (Pass)" 'Green'
+    } else {
+        Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow'
+    }
 
-	if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
-		Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)] : [$($Data.Randgrid.AllMd5s)]" 'Green'
-	} else {
-		if (-not $Data.Randgrid.RegKeyExists) {
-			Log-Output 'CRITICAL: Randgrid Registry Key Missing' 'Red'
-		}
+    if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
+        Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)] : [$($Data.Randgrid.AllMd5s)]" 'Green'
+    } else {
+        if (-not $Data.Randgrid.RegKeyExists) {
+            Log-Output 'CRITICAL: Randgrid Registry Key Missing' 'Red'
+        }
 
-		if (-not $Data.Randgrid.RandgridFileExists) {
-			Log-Output 'CRITICAL: Randgrid.sys File Missing from Path' 'Red'
-		}
-	}
+        if (-not $Data.Randgrid.RandgridFileExists) {
+            Log-Output 'CRITICAL: Randgrid.sys File Missing from Path' 'Red'
+        }
+    }
 
     if ($Data.CompatibilityFlags.Passed) {
         Log-Output "[PASS] Compatibility flags are clear." 'Green'
@@ -4542,59 +4539,59 @@ function Show-UIOutput ($Data) {
         }
     }
 
-	if ($Data.UACLevel -eq "Default") {
-		Log-Output "[PASS] UAC $($Data.UACLevel)" Green
-	} else {
-		Log-Output "UAC $($Data.UACLevel)" Yellow
-	}
+    if ($Data.UACLevel -eq "Default") {
+        Log-Output "[PASS] UAC $($Data.UACLevel)" Green
+    } else {
+        Log-Output "UAC $($Data.UACLevel)" Yellow
+    }
 
-	if ($Data.TestLocalAttestation) {
-		Log-Output "[PASS] Local Attestation Test" Green
-	} else {
-		Log-Output "[FAIL] Local Attestation Test" Red
-	}
+    if ($Data.TestLocalAttestation) {
+        Log-Output "[PASS] Local Attestation Test" Green
+    } else {
+        Log-Output "[FAIL] Local Attestation Test" Red
+    }
 
-	if ($Data.MicrosoftCa.Passed) {
-		Log-Output "[PASS] CA 2023: $($Data.MicrosoftCA.OverallState)" Green
-	} else {
-		Log-Output "[INFO] No CA 2023: $($Data.MicrosoftCA.OverallState)"
-	}
+    if ($Data.MicrosoftCa.Passed) {
+        Log-Output "[PASS] CA 2023: $($Data.MicrosoftCA.OverallState)" Green
+    } else {
+        Log-Output "[INFO] No CA 2023: $($Data.MicrosoftCA.OverallState)"
+    }
 
-	if ($Data.Sha256 -eq $false) {
-		Log-Output "[CHECK] IntegrityServices Sha256" Yellow
-	}
+    if ($Data.Sha256 -eq $false) {
+        Log-Output "[CHECK] IntegrityServices Sha256" Yellow
+    }
 
-	if ($Data.ActivisionKey.Success) {
-		Log-Output "[PASS] Activision Key $($Data.ActivisionKey.Message)" 'Green'
-	}else{
-		Log-Output "[FAIL] Activision Key $($Data.ActivisionKey.Message)" 'Red'
-	}
+    if ($Data.ActivisionKey.Success) {
+        Log-Output "[PASS] Activision Key $($Data.ActivisionKey.Message)" 'Green'
+    }else{
+        Log-Output "[FAIL] Activision Key $($Data.ActivisionKey.Message)" 'Red'
+    }
 
-	if ($Data.PartitionStyle.Success) {
-		Log-Output "[PASS] Disk: $($Data.PartitionStyle.Type)" 'Green'
-	}else{
-		Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
-	}
+    if ($Data.PartitionStyle.Success) {
+        Log-Output "[PASS] Disk: $($Data.PartitionStyle.Type)" 'Green'
+    }else{
+        Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
+    }
 
-	if ($Data.dismFullHealth -eq "NA" ){
-		Log-Output "[INFO] Dism NA" 'white'
-	}elseif ($Data.dismFullHealth){
-		Log-Output "[PASS] Dism" 'Green'
-	}else{
-		Log-Output "[WARN] Dism" 'Yellow'
-	}
+    if ($Data.dismFullHealth -eq "NA" ){
+        Log-Output "[INFO] Dism NA" 'white'
+    }elseif ($Data.dismFullHealth){
+        Log-Output "[PASS] Dism" 'Green'
+    }else{
+        Log-Output "[WARN] Dism" 'Yellow'
+    }
 
-	Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
+    Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
     Log-Output "Battery: $($Data.BatteryInfo.Text)"
 
     Show-PlatformStatus
 
      if ($Data.CoreIsolation.Passed) { Log-Output "[PASS]: $($Data.CoreIsolation.Message)" 'Green'
-	} else {
-		Log-Output "Info: $($Data.CoreIsolation.Message)"
-	}
+    } else {
+        Log-Output "Info: $($Data.CoreIsolation.Message)"
+    }
 
-	Log-Output "IME Driver Ver: $($Data.IntelMeVersion.DriverVersion) - Firmware Ver: $($Data.IntelMeVersion.FirmwareVersion) - Date: $($Data.IntelMeVersion.DriverDate)"
+    Log-Output "IME Driver Ver: $($Data.IntelMeVersion.DriverVersion) - Firmware Ver: $($Data.IntelMeVersion.FirmwareVersion) - Date: $($Data.IntelMeVersion.DriverDate)"
 
     $biosObj = Get-CimInstance -ClassName Win32_Bios
     if ($biosObj -and $biosObj.ReleaseDate -and $Data.IntelMeVersion.RawDate) {
@@ -4611,8 +4608,8 @@ function Show-UIOutput ($Data) {
         }catch { }
     }
 
-	Log-Output "Windows Age:  $($Data.DaysSinceInstall) days"
-	if ($Data.BitLocker -and $Data.BitLocker.Passed) {
+    Log-Output "Windows Age:  $($Data.DaysSinceInstall) days"
+    if ($Data.BitLocker -and $Data.BitLocker.Passed) {
         Log-Output "BitLocker Enabled: Yes" 'Red'
     } else {
         Log-Output "BitLocker Enabled: No"
@@ -4620,76 +4617,76 @@ function Show-UIOutput ($Data) {
 
     Log-Output "$($Data.TpmEndorsement.Text)"
 
-	if ($Data.Pluton){
-		Log-Output "RESULT: Pluton detected" 'DarkYellow'
-	}
+    if ($Data.Pluton){
+        Log-Output "RESULT: Pluton detected" 'DarkYellow'
+    }
 
-	if ($Data.SocialMedia_UEFICA2023){
-		Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
-	}
+    if ($Data.SocialMedia_UEFICA2023){
+        Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
+    }
 
-	Log-Output "INFO: EK: $($Data.HasEK)"
-	Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
+    Log-Output "INFO: EK: $($Data.HasEK)"
+    Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
     Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
 
-	Log-Output "PK" -Color "Cyan"
-	$Data.SbKeys.PlatformKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
-		Log-Output $_
-	}
-	Log-Output "KEK" -Color "Cyan"
-	$Data.SbKeys.KeyExchangeKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
-		Log-Output $_
-	}
-	Log-Output "DB" -Color "Cyan"
-	$Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
-		Log-Output $_
-	}
-	Log-Output "Efi Boot: $($Data.EfiBootSignature.Year)" 'White'
+    Log-Output "PK" -Color "Cyan"
+    $Data.SbKeys.PlatformKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output "KEK" -Color "Cyan"
+    $Data.SbKeys.KeyExchangeKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output "DB" -Color "Cyan"
+    $Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
+        Log-Output $_
+    }
+    Log-Output "Efi Boot: $($Data.EfiBootSignature.Year)" 'White'
 
-	if(!$Data.IsWindowsBootFirst){
-		Log-Output "[WARN] Windows Boot Manager is not the first boot" 'Yellow'
-	}
+    if(!$Data.IsWindowsBootFirst){
+        Log-Output "[WARN] Windows Boot Manager is not the first boot" 'Yellow'
+    }
 
-	Log-Output "`n--- CERTREQ ---" 'Cyan'
+    Log-Output "`n--- CERTREQ ---" 'Cyan'
     $certOut = $Data.certRaw | Protect-AIKPrivacy
     Log-Output $certOut 'Green'
 
-	Log-Output "--- Events ---" 'Cyan'
-	$Data.EventId87 | ForEach-Object {
-		Log-Output $_
-	}
+    Log-Output "--- Events ---" 'Cyan'
+    $Data.EventId87 | ForEach-Object {
+        Log-Output $_
+    }
 
-	if (!$Data.GetEvent1040Details.Found){
-		Log-Output "[PASS] Event 1040" 'Green'
-	}else{
-		Log-Output "[INFO] Event 1040 $($Data.GetEvent1040Details.Filename)"
-	}
+    if (!$Data.GetEvent1040Details.Found){
+        Log-Output "[PASS] Event 1040" 'Green'
+    }else{
+        Log-Output "[INFO] Event 1040 $($Data.GetEvent1040Details.Filename)"
+    }
 
-	if ($Data.IsOverallAIKPass) {
-		Log-Output "[PASS] OverallAIKResult" 'Green'
-	}else{
-		Log-Output "[FAIL] OverallAIKResult" 'Yellow'
-	}
-	if ($data.failureMessage) {
-		if ($data.OverallPassResult -eq 1) {
-			Log-Output $data.failureMessage 'Red'
-		}else{
-			Log-Output $data.failureMessage 'Yellow'
-		}
-	}
+    if ($Data.IsOverallAIKPass) {
+        Log-Output "[PASS] OverallAIKResult" 'Green'
+    }else{
+        Log-Output "[FAIL] OverallAIKResult" 'Yellow'
+    }
+    if ($data.failureMessage) {
+        if ($data.OverallPassResult -eq 1) {
+            Log-Output $data.failureMessage 'Red'
+        }else{
+            Log-Output $data.failureMessage 'Yellow'
+        }
+    }
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
-	Log-Output $Data.parsedTpmToolType
-	$exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
-			   'Lockout Counter', 'Max Auth Fail', 'Lockout Interval', 'Lockout Recovery'
+    Log-Output $Data.parsedTpmToolType
+    $exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
+               'Lockout Counter', 'Max Auth Fail', 'Lockout Interval', 'Lockout Recovery'
     foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
         if ($prop.Name -notin $exclude) {
             Log-Output ("{0,-30}: {1}" -f $prop.Name, $prop.Value)
         }
     }
 
-	Log-Output "`n--- LOGS ---" 'Cyan'
+    Log-Output "`n--- LOGS ---" 'Cyan'
     if ($Data.CodBrokerLog.Exists) {
         if ($Data.CodBrokerLog.Passed) {
             Log-Output "PASS: broker_service.log" 'Green'
@@ -4705,58 +4702,58 @@ function Show-UIOutput ($Data) {
         Log-Output "RESULT: broker_service.log not found" 'White'
     }
 
-	foreach ($Status in $Data.CodBootstrapperStatus) {
-		if ($Status.Found) {
-			if ($Status.Passed) {
-				Log-Output "PASS: bootstrapper.log" 'Green'
-			} else {
-				Log-Output "INFO: bootstrapper.log"
-				foreach ($Line in $Status.BottomLines) {
-					Log-Output "  $Line" 'White'
-				}
-			}
-		} else {
-			$SkipReason = if ($Status.BottomLines) { $Status.BottomLines[0] } else { "Path not found" }
-			Log-Output "RESULT: bootstrapper.log skipped: ($SkipReason)" 'White'
-		}
-	}
-	Log-Output ""
+    foreach ($Status in $Data.CodBootstrapperStatus) {
+        if ($Status.Found) {
+            if ($Status.Passed) {
+                Log-Output "PASS: bootstrapper.log" 'Green'
+            } else {
+                Log-Output "INFO: bootstrapper.log"
+                foreach ($Line in $Status.BottomLines) {
+                    Log-Output "  $Line" 'White'
+                }
+            }
+        } else {
+            $SkipReason = if ($Status.BottomLines) { $Status.BottomLines[0] } else { "Path not found" }
+            Log-Output "RESULT: bootstrapper.log skipped: ($SkipReason)" 'White'
+        }
+    }
+    Log-Output ""
 
-	#Print-PCRTable
+    #Print-PCRTable
 
-	Show-TcgAttestationAudit -Data $Data
+    Show-TcgAttestationAudit -Data $Data
 
     Log-Output "`n---- TRUST ---" 'Cyan'
-	if($Data.TPMChainInfo.isCSMETGLPTT01SVN){
-		Log-Output "[INVESTIGATE] PTT 01SVN Cert" 'Yellow'
-	}
+    if($Data.TPMChainInfo.isCSMETGLPTT01SVN){
+        Log-Output "[INVESTIGATE] PTT 01SVN Cert" 'Yellow'
+    }
 
-	if($Data.TPMChainInfo.KeyFound -and $Data.TPMChainInfo.IsIntermediate){
-		Log-Output "[PASS] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Green'
-	}
+    if($Data.TPMChainInfo.KeyFound -and $Data.TPMChainInfo.IsIntermediate){
+        Log-Output "[PASS] Chain: $($Data.TPMChainInfo.MatchingRole)" 'Green'
+    }
 
-	foreach ($item in $Data.TPMChainInfo.ChainDetails) {
-		foreach ($prop in $item.PSObject.Properties) {
-			$line = "{0,-8}: {1}" -f $prop.Name, $prop.Value
-			Log-Output $line 'White'
-		}
+    foreach ($item in $Data.TPMChainInfo.ChainDetails) {
+        foreach ($prop in $item.PSObject.Properties) {
+            $line = "{0,-8}: {1}" -f $prop.Name, $prop.Value
+            Log-Output $line 'White'
+        }
 
-		Log-Output "" 'White'
-	}
+        Log-Output "" 'White'
+    }
 
     Show-Banner -OverallPassResult $Data.OverallPassResult
 
-	if (-not ($Data.EnrollSuccess)) {
-		Log-Output "EnrollSuccess Fail." 'Red'
-	}
+    if (-not ($Data.EnrollSuccess)) {
+        Log-Output "EnrollSuccess Fail." 'Red'
+    }
 
     if ($Data.OverallPassResult -eq 1) {
-		Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
+        Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
     }
 
     if ($Data.OverallPassResult -eq 0) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
-		Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
+        Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
 
         if ($Data.certRaw) {
             $certOut -split "`r?`n" | ForEach-Object {
@@ -4949,40 +4946,40 @@ function Invoke-MainExecution {
 }
 
 if ($TestFile -eq "-fix") {
-	Show-FixMenu
+    Show-FixMenu
 }else{
-	$rs = [runspacefactory]::CreateRunspace()
-	$rs.ApartmentState = 'STA'
-	$rs.Open()
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = 'STA'
+    $rs.Open()
 
-	$ps = [powershell]::Create()
-	$ps.Runspace = $rs
-	$null = $ps.AddScript($guiScript).AddArgument($syncHash)
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    $null = $ps.AddScript($guiScript).AddArgument($syncHash)
 
-	# Launch GUI asynchronously
-	$asyncGuiResult = $ps.BeginInvoke()
+    # Launch GUI asynchronously
+    $asyncGuiResult = $ps.BeginInvoke()
 
-	while (-not $syncHash.IsGuiReady) {
-		Start-Sleep -Milliseconds 100
-	}
-	Show-UpdateMessage
+    while (-not $syncHash.IsGuiReady) {
+        Start-Sleep -Milliseconds 100
+    }
+    Show-UpdateMessage
 
-	$Data = Invoke-MainExecution
-	if ($null -eq $Data) { return $null }
+    $Data = Invoke-MainExecution
+    if ($null -eq $Data) { return $null }
 
-	Show-UserRecommendedSteps -Data $Data
-	Check-CodBrokerService -Data $Data
+    Show-UserRecommendedSteps -Data $Data
+    Check-CodBrokerService -Data $Data
 
-	while (-not $asyncGuiResult.IsCompleted) {
+    while (-not $asyncGuiResult.IsCompleted) {
         Start-Sleep -Milliseconds 200
     }
 
-	try {
-		$null = $ps.EndInvoke($asyncGuiResult)
-	} catch {}
-	finally {
-		$ps.Dispose()
-		$rs.Close()
-		$rs.Dispose()
-	}
+    try {
+        $null = $ps.EndInvoke($asyncGuiResult)
+    } catch {}
+    finally {
+        $ps.Dispose()
+        $rs.Close()
+        $rs.Dispose()
+    }
 }
