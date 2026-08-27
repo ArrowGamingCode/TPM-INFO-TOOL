@@ -57,17 +57,95 @@ $global:TotalSteps = 67
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
 $global:ClipboardBuffer = ""
-$global:ImageBuffer     = [System.Collections.Generic.List[PSObject]]::new()
-$global:DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
+
 $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
 $global:HasPCRFailures = $false
-$global:EnableUploadFeature = $true
 $global:isTest = ($TestFile -and (Test-Path $TestFile))
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$syncHash = [hashtable]::Synchronized(@{
+    ConsoleBox      = $null
+    ProgressBar     = $null
+    StatusLabel     = $null
+    PercentLabel    = $null
+    TitleLabel      = $null
+    CurrentTitle    = "TPM Attestation Status" # Default Title
+    CurrentPercent  = 0
+    CurrentStatus   = "Starting GUI..."
+    IsCompleted     = $false
+    IsGuiReady      = $false
+    enableUploadFeature = $true
+    IsClosing    = $false
+	WebUrl       = ""
+    PCID      = ""
+
+    ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
+    DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
+
+    colorMap = @{
+        "Cyan"       = [System.Drawing.Color]::Cyan
+        "DarkRed"    = [System.Drawing.Color]::Crimson
+        "DarkYellow" = [System.Drawing.Color]::Gold
+        "Blue"       = [System.Drawing.Color]::DeepSkyBlue
+        "Green"      = [System.Drawing.Color]::Lime
+        "Red"        = [System.Drawing.Color]::OrangeRed
+        "Yellow"     = [System.Drawing.Color]::Yellow
+        "White"      = [System.Drawing.Color]::White
+        "Gray"       = [System.Drawing.Color]::LightGray
+    }
+})
 
 # =========================================================================
 # FUNCTIONS
 # =========================================================================
+
+function Write-GuiHost {
+    param(
+        [Parameter(Position=0, Mandatory=$false)]
+        [string]$Message = "",
+        [string]$ForegroundColor = "White",
+        [switch]$NoNewline
+    )
+
+    $box = $syncHash.ConsoleBox
+
+    $targetColor = $syncHash.colorMap[$ForegroundColor]
+    if ($null -eq $targetColor) { $targetColor = [System.Drawing.Color]::White }
+
+    $formattedMessage = $Message -replace "\r?\n", "`r`n"
+    $textToAppend = if ($NoNewline) { $formattedMessage } else { "$formattedMessage`r`n" }
+
+    $action = [System.Action[System.Drawing.Color, string]]{
+        param($color, $text)
+
+        $targetBox = $syncHash.ConsoleBox
+        if ($null -ne $targetBox -and -not $targetBox.IsDisposed) {
+            $targetBox.SelectionStart  = $targetBox.TextLength
+            $targetBox.SelectionLength = 0
+            $targetBox.SelectionColor  = $color
+            $targetBox.AppendText($text)
+            $targetBox.ScrollToCaret()
+        }
+    }
+
+    [void]$box.BeginInvoke($action, [object[]]@($targetColor, [string]$textToAppend))
+}
+
+function Clear-GuiHost {
+    $box = $syncHash.ConsoleBox
+
+    $action = [System.Action]{
+        $targetBox = $syncHash.ConsoleBox
+        if ($null -ne $targetBox -and -not $targetBox.IsDisposed) {
+            $targetBox.Clear()
+        }
+    }
+
+    [void]$box.BeginInvoke($action)
+}
 
 function Start-TPM-Maintenance {
 	#Read TPM from nvram.
@@ -77,7 +155,7 @@ function Start-TPM-Maintenance {
 function Step-Progress {
     $global:ProgressStep++
     $PercentComplete = [math]::Min(100, [int](($global:ProgressStep / $global:TotalSteps) * 100))
-    Write-Progress -Activity "Loading System Diagnostics" -Status "Progress: $PercentComplete%" -PercentComplete $PercentComplete
+    Set-GuiProgress -Activity "Loading System Diagnostics" -Status "Progress: $PercentComplete%" -PercentComplete $PercentComplete
 }
 
 function Get-CpuCompliance {
@@ -1187,12 +1265,12 @@ function Get-TpmEndorsementCertStatus {
 }
 
 function Show-UpdateMessage {
-	Write-Host "`n`n`n`n`n"
-    Write-Host "===================================================================================" -ForegroundColor Yellow
-    Write-Host " You can check for updates here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor White
-	Write-Host "===================================================================================`n" -ForegroundColor Yellow
+    Write-GuiHost "Please wait while system information is retrieved..."
+    Write-GuiHost "Stage 1 done."
+    Write-GuiHost "===================================================================================" -ForegroundColor Yellow
+    Write-GuiHost " You can check for updates here:  https://github.com/ArrowGamingCode/TPM-INFO-TOOL" -ForegroundColor White
+    Write-GuiHost "===================================================================================`n" -ForegroundColor Yellow
 }
-Show-UpdateMessage
 
 function Get-PowerShellVersion {
     return $PSVersionTable.PSVersion.ToString()
@@ -1289,16 +1367,20 @@ function Check-CodBrokerService {
     )
 
     if ($Data.CodBroker -and $Data.CodBroker.StartType -eq 'Disabled') {
-        Write-Host "`n=========================================================================" -ForegroundColor Yellow
-        Write-Host "[!] COD Broker Service is currently Disabled." -ForegroundColor Yellow
-        $choice = Read-Host "Would you like to attempt to repair it now? [Y/N]"
+		$result = [System.Windows.Forms.MessageBox]::Show(
+			"COD Broker Service is currently Disabled. Would you like to attempt to repair it now?",
+			"Repair Service",
+			[System.Windows.Forms.MessageBoxButtons]::YesNo,
+			[System.Windows.Forms.MessageBoxIcon]::Question,
+			[System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+			[System.Windows.Forms.MessageBoxOptions]::ServiceNotification
+		)
 
-        if ($choice -match '^[Yy]') {
-            try {
-                Set-Service -Name 'COD.Broker.Service' -StartupType Manual -ErrorAction Stop
-            } catch {
-            }
-        }
+		if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+			try {
+				Set-Service -Name 'COD.Broker.Service' -StartupType Manual -ErrorAction Stop
+			} catch { }
+		}
     }
 }
 
@@ -1473,6 +1555,9 @@ function Convert-Rot13 {
 function Get-URL { #Reduce Spam
     return "https://" + (Convert-Rot13 "neebjtnzvat.qri") + "/INFO_TOOL/"
 }
+
+$syncHash.PCID = Get-PC-ID;
+$syncHash.WebUrl = Get-URL;
 
 function Get-Win10SupportStatus {
     $OS = (Get-CimInstance -ClassName Win32_OperatingSystem).Caption
@@ -2167,7 +2252,7 @@ function Get-UacStatus {
 }
 
 function Get-CertreqAttestation($Data) {
-	Write-Host "Testing Certreq.." -ForegroundColor White
+	Write-GuiHost "Testing Certreq.." -ForegroundColor White
 	if ($global:isTest) {
         $certRaw = Get-Content $TestFile -Raw
     } else {
@@ -2180,7 +2265,7 @@ function Get-CertreqAttestation($Data) {
             [System.Threading.Thread]::CurrentThread.CurrentUICulture = $oldCulture
         }
     }
-	Write-Progress -Activity "Loading System Diagnostics" -Completed
+	Set-GuiProgress -Activity "Loading System Diagnostics" -Completed
 
     $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
 	$enrollSuccess = $certRaw -match $successPatterns
@@ -2533,7 +2618,7 @@ function Log-Data ($Data) {
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
         foreach ($line in $cleanedLines) {
-            $global:DataBuffer.Add([PSCustomObject]@{
+            $syncHash.DataBuffer.Add([PSCustomObject]@{
                 Text = $line
             })
         }
@@ -2682,9 +2767,9 @@ function Test-DismHealthAsync {
 }
 
 function Display-DismMessage {
-	write-host "========================================================================="
-	write-host "Waiting for DISM.."
-	write-host "========================================================================="
+	Write-GuiHost "========================================================================="
+	Write-GuiHost "Waiting for DISM.."
+	Write-GuiHost "========================================================================="
 }
 
 # =========================================================================
@@ -2822,7 +2907,7 @@ function Reset-WindowsCache {
 		Start-Sleep -Seconds 1
 	}
 
-	Write-Progress -Activity "Waiting" -Completed
+	Set-GuiProgress -Activity "Waiting" -Completed
 	Write-Host "`nenrollaik.."
 	certreq -q -enrollaik -f -config '""'
 	certutil -pulse
@@ -3025,6 +3110,9 @@ function Get-IntelCsmeStatus {
     return "NA"
 }
 
+
+
+
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -3059,18 +3147,67 @@ function Print-PCRTable {
 
 function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
     if ($NoNewLine) {
-        Write-Host $Text -ForegroundColor $Color -NoNewline
+		Write-GuiHost $Text  -ForegroundColor $Color -NoNewline
         $global:ClipboardBuffer += $Text
     } else {
-        Write-Host $Text -ForegroundColor $Color
+		Write-GuiHost $Text -ForegroundColor $Color
         $global:ClipboardBuffer += "$Text`r`n"
     }
 
-    $global:ImageBuffer.Add([PSCustomObject]@{
+    $syncHash.ImageBuffer.Add([PSCustomObject]@{
         Text      = $Text
         Color     = $Color
         NoNewLine = $NoNewLine
     })
+}
+
+function Set-GuiProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Activity,
+
+        [Parameter(Position = 1)]
+        [string]$Status,
+
+        [Parameter(Position = 2)]
+        [Alias("Percent")]
+        [int]$PercentComplete = -1,
+
+        [string]$CurrentOperation,
+
+        [int]$Id = 0,
+        [int]$ParentId = -1,
+        [switch]$Completed,
+        [int]$SecondsRemaining = -1
+    )
+
+    if ($Activity) {
+        $syncHash.CurrentTitle = $Activity
+    }
+
+    $statusText = if ($Status -and $CurrentOperation) {
+        "$Status - $CurrentOperation"
+    } elseif ($Status) {
+        $Status
+    } elseif ($CurrentOperation) {
+        $CurrentOperation
+    } else {
+        $null
+    }
+
+    if ($statusText) {
+        $syncHash.CurrentStatus = $statusText
+    }
+
+    if ($PercentComplete -ge 0) {
+        $syncHash.CurrentPercent = [Math]::Min(100, [Math]::Max(0, $PercentComplete))
+    }
+
+    if ($Completed) {
+        $syncHash.CurrentPercent = 100
+        $syncHash.IsCompleted = $true
+    }
 }
 
 function Show-PCR_Message() {
@@ -3628,322 +3765,442 @@ $RevokedShims = @(
     "2EA557C44B83C0AD6B71EFB7EDCC18B6337AD1C1D682155DD9451B051B62FF40"
 )
 
-
 # =========================================================================
 # GUI FORM
 # =========================================================================
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
 
-function Show-TpmGuiFormMessage {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        $AttestationPass
-    )
+$guiScript = {
+    param($syncHash)
 
-    [System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+    function Export-ReportToImage {
+        param(
+            [Parameter(Mandatory=$true)]
+            [AllowEmptyCollection()]
+            [array]$ImageBuffer,
 
-    $exceptionHandler = {
-        param($sender, $eventArgs)
-    }
-    [System.Windows.Forms.Application]::add_ThreadException($exceptionHandler)
+            [Parameter(Mandatory=$false)]
+            [hashtable]$ColorMap = @{}
+        )
 
-    try {
-        $ColorMap = @{
-            "Cyan"       = [System.Drawing.Color]::Cyan
-            "DarkRed"    = [System.Drawing.Color]::Crimson
-            "DarkYellow" = [System.Drawing.Color]::Gold
-            "Blue"       = [System.Drawing.Color]::DeepSkyBlue
-            "Green"      = [System.Drawing.Color]::Lime
-            "Red"        = [System.Drawing.Color]::OrangeRed
-            "Yellow"     = [System.Drawing.Color]::Yellow
-            "White"      = [System.Drawing.Color]::White
-        }
-
-        $bgColor       = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
-        $cardBgColor   = [System.Drawing.Color]::White
-        $textDark      = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
-        $darkGreyBtn   = [System.Drawing.ColorTranslator]::FromHtml("#334155")
-        $greenCloseBtn = [System.Drawing.ColorTranslator]::FromHtml("#16A34A")
-		
-        if ($AttestationPass -eq 1) {
-            $statusText    = "PASSED"
-            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#DCFCE7")
-            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#166534")
-        } elseif ($AttestationPass -eq 0) {
-            $statusText    = "FAILED"
-            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#FEE2E2")
-            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#991B1B")
-        } else {
-            $statusText    = "UNKNOWN"
-            $statusBg      = [System.Drawing.ColorTranslator]::FromHtml("#FEF3C7")
-            $statusFg      = [System.Drawing.ColorTranslator]::FromHtml("#92400E")
-        }
-
-        $form = New-Object System.Windows.Forms.Form -Property @{
-            Text            = "TPM INFO Tool"
-            Size            = New-Object System.Drawing.Size(620, 370)
-            StartPosition   = "CenterScreen"
-            FormBorderStyle = "FixedSingle"
-            MaximizeBox     = $false
-            MinimizeBox     = $true
-            BackColor       = $bgColor
-            TopMost         = $true
-        }
-
-        $pnlHeader = New-Object System.Windows.Forms.Panel -Property @{
-            Location  = New-Object System.Drawing.Point(0, 0)
-            Size      = New-Object System.Drawing.Size(620, 75)
-            BackColor = $cardBgColor
-        }
-
-        $lblTitle = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(24, 22)
-            Size      = New-Object System.Drawing.Size(300, 32)
-            Text      = "TPM Attestation Status"
-            Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
-            ForeColor = $textDark
-        }
-
-        $lblStatus = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(440, 18)
-            Size      = New-Object System.Drawing.Size(130, 38)
-            Text      = $statusText
-            Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-            ForeColor = $statusFg
-            BackColor = $statusBg
-            TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-        }
-
-        $pnlHeader.Controls.Add($lblTitle)
-        $pnlHeader.Controls.Add($lblStatus)
-        $form.Controls.Add($pnlHeader)
-
-        $checkmarkChar = [char]0x2713
-        $lblNotice = New-Object System.Windows.Forms.Label -Property @{
-            Location  = New-Object System.Drawing.Point(24, 88)
-            Size      = New-Object System.Drawing.Size(560, 28)
-            Text      = "$checkmarkChar Full report copied to clipboard. Ready to paste into support forums."
-            Font      = New-Object System.Drawing.Font("Segoe UI", 11.5, [System.Drawing.FontStyle]::Bold)
-            ForeColor = [System.Drawing.Color]::Black
-        }
-        $form.Controls.Add($lblNotice)
-
-        $currentY = 126
-        if ($global:EnableUploadFeature) {
-            $btnUpload = New-Object System.Windows.Forms.Button -Property @{
-                Location  = New-Object System.Drawing.Point(24, $currentY)
-                Size      = New-Object System.Drawing.Size(550, 44)
-                Text      = "Upload Diagnostic Data for Research or Code"
-                Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-                FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-                BackColor = [System.Drawing.ColorTranslator]::FromHtml("#0D6EFD")
-                ForeColor = [System.Drawing.Color]::White
-                Cursor    = [System.Windows.Forms.Cursors]::Hand
+        try {
+            $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
+                Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
+                Title    = "Save Diagnostic Report"
+                FileName = "TPM_Attestation_Report.png"
             }
-            $btnUpload.FlatAppearance.BorderSize = 0
 
-            $btnUpload.Add_Click({
-                try {
-                    $msgResponse = [System.Windows.Forms.MessageBox]::Show(
-                        "Can you launch/play Call of Duty without attestation errors?",
-                        "Research Verification",
-                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                        [System.Windows.Forms.MessageBoxIcon]::Question
-                    )
+            if ($saveDialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+                return
+            }
 
-                    $doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
-                    $machineHash = Get-PC-ID
-                    $formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
+            $textFont    = New-Object System.Drawing.Font("Courier New", 12)
+            $bitmapWidth = 1100
+            $padding     = 20
 
-                    $btnUpload.Text      = "Code: $formattedId"
-                    $btnUpload.BackColor = [System.Drawing.Color]::Transparent
-                    $btnUpload.Enabled   = $false
+            $testBitmap   = New-Object System.Drawing.Bitmap(1, 1)
+            $testGraphics = [System.Drawing.Graphics]::FromImage($testBitmap)
 
-					$bufferText = ($global:ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
-					$bufferData = ($global:DataBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+            $currentX   = $padding
+            $currentY   = $padding
+            $lineHeight = [Math]::Ceiling($testGraphics.MeasureString("X", $textFont).Height)
 
-                    $ms = New-Object System.IO.MemoryStream
-                    $gzip = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
-                    $writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
-                    $writer.Write($bufferText)
-					$writer.Write($bufferData)
-                    $writer.Close()
-                    $gzip.Close()
-                    $compressedData = [Convert]::ToBase64String($ms.ToArray())
-                    $ms.Close()
+            foreach ($item in $ImageBuffer) {
+                $lines = $item.Text -split "`r`n" -split "`n"
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    $lineText = $lines[$i]
+                    $textSize = $testGraphics.MeasureString($lineText, $textFont)
 
-                    $body = @{
-                        powershell_data = $compressedData
-                        id              = $machineHash
-                        doesCODwork     = $doesCodWork
+                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                        $currentX += $textSize.Width
+                    } else {
+                        $currentX = $padding
+                        $currentY += $lineHeight
                     }
+                }
+            }
 
-                    $response = Invoke-RestMethod -Uri (Get-URL) -Method Post -Body $body -TimeoutSec 7 -ErrorAction SilentlyContinue
-                } catch {}
-            })
-            $form.Controls.Add($btnUpload)
-            $currentY += 54
-        }
+            $bitmapHeight = [Math]::Max(100, $currentY + $padding)
+            $testGraphics.Dispose()
+            $testBitmap.Dispose()
 
-        $btnSaveImg = New-Object System.Windows.Forms.Button -Property @{
-            Location  = New-Object System.Drawing.Point(24, $currentY)
-            Size      = New-Object System.Drawing.Size(268, 42)
-            Text      = "Save Report Image"
-            Font      = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
-            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-            BackColor = $darkGreyBtn
-            ForeColor = [System.Drawing.Color]::White
-        }
-        $btnSaveImg.FlatAppearance.BorderSize = 0
+            $bitmap   = New-Object System.Drawing.Bitmap($bitmapWidth, $bitmapHeight)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 
-        $btnSaveImg.Add_Click({
-            try {
-                $saveDialog = New-Object System.Windows.Forms.SaveFileDialog -Property @{
-                    Filter   = "PNG Image|*.png|JPEG Image|*.jpg"
-                    Title    = "Save Diagnostic Report"
-                    FileName = "TPM_Attestation_Report.png"
+            $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+            $graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $graphics.Clear([System.Drawing.Color]::Black)
+
+            $currentX = $padding
+            $currentY = $padding
+
+            foreach ($item in $ImageBuffer) {
+                $drawingColor = [System.Drawing.Color]::White
+
+                if ($null -ne $ColorMap -and $ColorMap.ContainsKey($item.Color)) {
+                    $drawingColor = $ColorMap[$item.Color]
                 }
 
-                if ($saveDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-                    $textFont    = New-Object System.Drawing.Font("Courier New", 12)
-                    $bitmapWidth = 1100
-                    $padding     = 20
+                $brush = New-Object System.Drawing.SolidBrush($drawingColor)
+                $lines = $item.Text -split "`r`n" -split "`n"
 
-                    $testBitmap   = New-Object System.Drawing.Bitmap(1, 1)
-                    $testGraphics = [System.Drawing.Graphics]::FromImage($testBitmap)
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                    $lineText = $lines[$i]
 
-                    $currentX = $padding
-                    $currentY = $padding
-                    $lineHeight = [Math]::Ceiling($testGraphics.MeasureString("X", $textFont).Height)
+                    $graphics.DrawString($lineText, $textFont, $brush, $currentX, $currentY)
+                    $textSize = $graphics.MeasureString($lineText, $textFont)
 
-                    foreach ($item in $global:ImageBuffer) {
-                        $lines = $item.Text -split "`r`n" -split "`n"
-                        for ($i = 0; $i -lt $lines.Count; $i++) {
-                            $lineText = $lines[$i]
-                            $textSize = $testGraphics.MeasureString($lineText, $textFont)
-
-                            if ($i -gt 0) {
-                                $currentX = $padding
-                                $currentY += $lineHeight
-                            }
-
-                            if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
-                                $currentX += $textSize.Width
-                            } else {
-                                $currentX = $padding
-                                $currentY += $lineHeight
-                            }
-                        }
+                    if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
+                        $currentX += ($textSize.Width - 5)
+                    } else {
+                        $currentX = $padding
+                        $currentY += $lineHeight
                     }
-                    $bitmapHeight = $currentY + $padding
-
-                    $testGraphics.Dispose()
-                    $testBitmap.Dispose()
-
-                    $bitmap   = New-Object System.Drawing.Bitmap($bitmapWidth, $bitmapHeight)
-                    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-
-                    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
-                    $graphics.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-                    $graphics.Clear([System.Drawing.Color]::Black)
-
-                    $currentX = $padding
-                    $currentY = $padding
-
-                    foreach ($item in $global:ImageBuffer) {
-                        $drawingColor = $ColorMap[$item.Color]
-                        if ($null -eq $drawingColor) { $drawingColor = [System.Drawing.Color]::White }
-                        $brush = New-Object System.Drawing.SolidBrush($drawingColor)
-
-                        $lines = $item.Text -split "`r`n" -split "`n"
-                        for ($i = 0; $i -lt $lines.Count; $i++) {
-                            $lineText = $lines[$i]
-
-                            if ($i -gt 0) {
-                                $currentX = $padding
-                                $currentY += $lineHeight
-                            }
-
-                            $graphics.DrawString($lineText, $textFont, $brush, $currentX, $currentY)
-                            $textSize = $graphics.MeasureString($lineText, $textFont)
-
-                            if ($i -eq ($lines.Count - 1) -and $item.NoNewLine) {
-                                $currentX += ($textSize.Width - ($textFont.Size * 0.4))
-                            } else {
-                                $currentX = $padding
-                                $currentY += $lineHeight
-                            }
-                        }
-                        $brush.Dispose()
-                    }
-
-                    $graphics.Flush()
-
-                    $extension = [System.IO.Path]::GetExtension($saveDialog.FileName).ToLower()
-                    $imageFormat = [System.Drawing.Imaging.ImageFormat]::Png
-                    if ($extension -eq ".jpg" -or $extension -eq ".jpeg") {
-                        $imageFormat = [System.Drawing.Imaging.ImageFormat]::Jpeg
-                    }
-
-                    $bitmap.Save($saveDialog.FileName, $imageFormat)
-
-                    $textFont.Dispose()
-                    $graphics.Dispose()
-                    $bitmap.Dispose()
-
-                    $btnSaveImg.Visible = $false
                 }
-                $saveDialog.Dispose()
-            } catch {}
-        })
-        $form.Controls.Add($btnSaveImg)
+                $brush.Dispose()
+            }
 
-        $btnCloseClear = New-Object System.Windows.Forms.Button -Property @{
-            Location  = New-Object System.Drawing.Point(306, $currentY)
-            Size      = New-Object System.Drawing.Size(268, 42)
-            Text      = "Clear Clipboard and Close"
-            Font      = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
-            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-            BackColor = $darkGreyBtn
-            ForeColor = [System.Drawing.Color]::White
+            $graphics.Flush()
+            $graphics.Dispose()
+
+            $extension = [System.IO.Path]::GetExtension($saveDialog.FileName).ToLower()
+            $imageFormat = [System.Drawing.Imaging.ImageFormat]::Png
+            if ($extension -match "\.jpe?g$") {
+                $imageFormat = [System.Drawing.Imaging.ImageFormat]::Jpeg
+            }
+
+            $bitmap.Save($saveDialog.FileName, $imageFormat)
+            $bitmap.Dispose()
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "Report successfully saved!",
+                "Success",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
         }
-        $btnCloseClear.FlatAppearance.BorderSize = 0
-
-        $btnCloseClear.Add_Click({
-            try { [System.Windows.Forms.Clipboard]::Clear() } catch {}
-            try { $form.Close() } catch {}
-        })
-        $form.Controls.Add($btnCloseClear)
-
-        $currentY += 52
-
-        $btnClose = New-Object System.Windows.Forms.Button -Property @{
-            Location  = New-Object System.Drawing.Point(24, $currentY)
-            Size      = New-Object System.Drawing.Size(550, 44)
-            Text      = "Close"
-            Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-            FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-            BackColor = $greenCloseBtn
-            ForeColor = [System.Drawing.Color]::White
-            TabIndex  = 0
+        catch {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Error saving image:`n$($_.Exception.Message)",
+                "Save Failed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
         }
-        $btnClose.FlatAppearance.BorderSize = 0
+    }
 
-        $btnClose.Add_Click({
-            try { $form.Close() } catch {}
-        })
-        $form.Controls.Add($btnClose)
+	function Submit-ResearchData {
+		param(
+			[Parameter(Mandatory=$true)]
+			[System.Windows.Forms.Button]$Button,
 
-        $form.ShowDialog() | Out-Null
+			[Parameter(Mandatory=$true)]
+			[hashtable]$SyncHash
+		)
+
+		try {
+			$msgResponse = [System.Windows.Forms.MessageBox]::Show(
+				"Can you launch/play Call of Duty without attestation errors?",
+				"Research Verification",
+				[System.Windows.Forms.MessageBoxButtons]::YesNo,
+				[System.Windows.Forms.MessageBoxIcon]::Question
+			)
+
+			$doesCodWork = if ($msgResponse -eq [System.Windows.Forms.DialogResult]::Yes) { "true" } else { "false" }
+
+			$machineHash = $SyncHash.PCID
+
+			if ([string]::IsNullOrWhiteSpace($machineHash)) {
+				throw "Get-PC-ID returned null or empty string."
+			}
+
+			if ($machineHash.Length -lt 7) {
+				throw "Get-PC-ID returned string shorter than 7 characters: '$machineHash'"
+			}
+
+			$formattedId = "{0}-{1}" -f $machineHash.Substring(0,3), $machineHash.Substring(3,4)
+
+			$Button.Text      = "Code: $formattedId"
+			$Button.BackColor = [System.Drawing.Color]::Transparent
+			$Button.Enabled   = $false
+			$Button.Font = New-Object System.Drawing.Font($Button.Font.FontFamily, 14, [System.Drawing.FontStyle]::Bold)
+			$Button.ForeColor = $blueBtn
+
+			$Button.Refresh()
+			[System.Windows.Forms.Application]::DoEvents()
+
+			$bufferText   = ($SyncHash.ImageBuffer | ForEach-Object { $_.Text }) -join "`r`n"
+			$bufferData   = ($SyncHash.DataBuffer  | ForEach-Object { $_.Text }) -join "`r`n"
+			$combinedText = $bufferText + "`r`n" + $bufferData
+
+			$ms     = New-Object System.IO.MemoryStream
+			$gzip   = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress, $true)
+			$writer = New-Object System.IO.StreamWriter($gzip, [System.Text.Encoding]::UTF8)
+
+			$writer.Write($combinedText)
+			$writer.Flush()
+			$writer.Dispose()
+			$gzip.Dispose()
+
+			$compressedBytes = $ms.ToArray()
+			$ms.Dispose()
+
+			$compressedData = [Convert]::ToBase64String($compressedBytes)
+
+			$apiUrl = $SyncHash.WebUrl
+
+			$body = @{
+				powershell_data = $compressedData
+				id              = $machineHash
+				doesCODwork     = $doesCodWork
+			}
+
+			$response = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -TimeoutSec 15 -ErrorAction Stop
+
+			return $response
+
+		} catch {
+			Write-Error "Failed to submit data"
+			$Button.Text    = "Error Submitting"
+			$Button.Enabled = $false
+		}
+	}
+
+    $bgColor        = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
+    $cardBgColor    = [System.Drawing.Color]::White
+    $textDark       = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
+    $darkGreyBtn    = [System.Drawing.ColorTranslator]::FromHtml("#334155")
+    $orangeBtn      = [System.Drawing.ColorTranslator]::FromHtml("#EA580C")
+    $blueBtn        = [System.Drawing.ColorTranslator]::FromHtml("#0D6EFD")
+
+    $form = New-Object System.Windows.Forms.Form -Property @{
+        Text            = "TPM-INFO-Tool"
+        Size            = New-Object System.Drawing.Size(1000, 880)
+        StartPosition   = "CenterScreen"
+        FormBorderStyle = "Sizable"
+        MaximizeBox     = $true
+        MinimizeBox     = $true
+        BackColor       = $bgColor
     }
-    catch {
+
+    $pnlControls = New-Object System.Windows.Forms.Panel -Property @{
+        Dock      = [System.Windows.Forms.DockStyle]::Top
+        Height    = 250
+        BackColor = $bgColor
     }
-    finally {
-        [System.Windows.Forms.Application]::remove_ThreadException($exceptionHandler)
-        if ($null -ne $form) { $form.Dispose() }
+
+    $pnlHeader = New-Object System.Windows.Forms.Panel -Property @{
+        Location  = New-Object System.Drawing.Point(0, 0)
+        Size      = New-Object System.Drawing.Size(650, 55)
+        BackColor = $cardBgColor
     }
+
+    $lblTitle = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(24, 12)
+        Size      = New-Object System.Drawing.Size(400, 32)
+        Text      = "TPM Attestation Status"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+        ForeColor = $textDark
+    }
+
+    $syncHash.TitleLabel = $lblTitle
+
+    $lblStatus = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(440, 10)
+        Size      = New-Object System.Drawing.Size(130, 36)
+        Text      = "IN PROGRESS"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+        ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#1E40AF")
+        BackColor = [System.Drawing.ColorTranslator]::FromHtml("#DBEAFE")
+        TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    }
+
+    $pnlHeader.Controls.Add($lblTitle)
+    $pnlHeader.Controls.Add($lblStatus)
+    $pnlControls.Controls.Add($pnlHeader)
+
+    $checkmarkChar = [char]0x2713
+    $lblNotice = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(24, 60)
+        Size      = New-Object System.Drawing.Size(550, 24)
+        Text      = "$checkmarkChar Full report copied to clipboard. Ready to paste into support forums."
+        Font      = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
+        ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
+        Visible   = $false
+    }
+
+    $lblProgress = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(24, 85)
+        Size      = New-Object System.Drawing.Size(430, 18)
+        Text      = "Ready..."
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+        ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#475569")
+    }
+
+    $lblPercent = New-Object System.Windows.Forms.Label -Property @{
+        Location  = New-Object System.Drawing.Point(470, 85)
+        Size      = New-Object System.Drawing.Size(100, 18)
+        Text      = "0%"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+        ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#2563EB")
+        TextAlign = [System.Drawing.ContentAlignment]::TopRight
+    }
+
+    $progressBar = New-Object System.Windows.Forms.ProgressBar -Property @{
+        Location  = New-Object System.Drawing.Point(24, 106)
+        Size      = New-Object System.Drawing.Size(546, 18)
+        Minimum   = 0
+        Maximum   = 100
+        Value     = 0
+        Style     = [System.Windows.Forms.ProgressBarStyle]::Blocks
+    }
+
+    $pnlActionButtons = New-Object System.Windows.Forms.Panel -Property @{
+        Location  = New-Object System.Drawing.Point(24, 132)
+        Size      = New-Object System.Drawing.Size(830, 110)
+        BackColor = [System.Drawing.Color]::Transparent
+        Visible   = $false
+    }
+
+    $btnUpload = New-Object System.Windows.Forms.Button -Property @{
+        Location  = New-Object System.Drawing.Point(0, 0)
+        Size      = New-Object System.Drawing.Size(546, 40)
+        Text      = "Upload Diagnostic Data for Research or Help Code"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+        FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        BackColor = $blueBtn
+        ForeColor = [System.Drawing.Color]::White
+        Cursor    = [System.Windows.Forms.Cursors]::Hand
+    }
+    $btnUpload.FlatAppearance.BorderSize = 0
+
+    $btnUpload.Add_Click({
+       Submit-ResearchData -Button $btnUpload -SyncHash $syncHash
+    })
+
+    $btnSaveImage = New-Object System.Windows.Forms.Button -Property @{
+        Location  = New-Object System.Drawing.Point(0, 50)
+        Size      = New-Object System.Drawing.Size(268, 40)
+        Text      = "Save Report to Image"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+        FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        BackColor = $darkGreyBtn
+        ForeColor = [System.Drawing.Color]::White
+        Cursor    = [System.Windows.Forms.Cursors]::Hand
+    }
+    $btnSaveImage.FlatAppearance.BorderSize = 0
+
+    $btnSaveImage.Add_Click({
+        Export-ReportToImage -ImageBuffer $syncHash.ImageBuffer -ColorMap $syncHash.ColorMap
+    })
+
+    $btnClearClose = New-Object System.Windows.Forms.Button -Property @{
+        Location  = New-Object System.Drawing.Point(278, 50)
+        Size      = New-Object System.Drawing.Size(268, 40)
+        Text      = "Clear Clipboard and Close"
+        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+        FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        BackColor = $darkGreyBtn
+        ForeColor = [System.Drawing.Color]::White
+        Cursor    = [System.Windows.Forms.Cursors]::Hand
+    }
+    $btnClearClose.FlatAppearance.BorderSize = 0
+
+    $btnClearClose.Add_Click({
+        [System.Windows.Forms.Clipboard]::Clear()
+        $form.Close()
+    })
+
+    if ($syncHash.EnableUploadFeature) {
+        $pnlActionButtons.Controls.Add($btnUpload)
+    }
+
+    $pnlActionButtons.Controls.Add($btnSaveImage)
+    $pnlActionButtons.Controls.Add($btnClearClose)
+
+    $pnlControls.Controls.Add($lblNotice)
+    $pnlControls.Controls.Add($lblProgress)
+    $pnlControls.Controls.Add($lblPercent)
+    $pnlControls.Controls.Add($progressBar)
+    $pnlControls.Controls.Add($pnlActionButtons)
+
+    $consoleBox = New-Object System.Windows.Forms.RichTextBox -Property @{
+        Dock        = [System.Windows.Forms.DockStyle]::Fill
+        BackColor   = [System.Drawing.Color]::Black
+        ForeColor   = [System.Drawing.Color]::White
+        Font        = New-Object System.Drawing.Font("Consolas", 10.5)
+        ReadOnly    = $true
+        BorderStyle = [System.Windows.Forms.BorderStyle]::None
+    }
+
+    $syncHash.ConsoleBox   = $consoleBox
+    $syncHash.ProgressBar = $progressBar
+    $syncHash.StatusLabel  = $lblProgress
+    $syncHash.PercentLabel = $lblPercent
+
+    $form.Controls.Add($consoleBox)
+    $form.Controls.Add($pnlControls)
+
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 33
+    $timer.Add_Tick({
+        if ($form.IsDisposed -or $syncHash.IsClosing) { return }
+
+        if ($progressBar.Value -lt $syncHash.CurrentPercent) {
+            $progressBar.Value = [Math]::Min(100, $progressBar.Value + 1)
+        }
+
+        if ($syncHash.CurrentTitle -and $lblTitle.Text -ne $syncHash.CurrentTitle) {
+            $lblTitle.Text = $syncHash.CurrentTitle
+        }
+
+        if ($syncHash.CurrentStatus) {
+            $lblProgress.Text = $syncHash.CurrentStatus
+        }
+        $lblPercent.Text = "$($progressBar.Value)%"
+
+        if ($syncHash.IsCompleted -and $progressBar.Value -eq 100) {
+            $timer.Stop()
+
+            if ($syncHash.AttestationPass -eq 1) {
+                $lblStatus.Text      = "PASSED"
+                $lblStatus.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#DCFCE7")
+                $lblStatus.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#166534")
+            } elseif ($syncHash.AttestationPass -eq 0) {
+                $lblStatus.Text      = "FAILED"
+                $lblStatus.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#FEE2E2")
+                $lblStatus.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#991B1B")
+            } else {
+                $lblStatus.Text      = "UNKNOWN"
+                $lblStatus.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#E2E8F0")
+                $lblStatus.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#334155")
+            }
+
+            $progressBar.Visible = $false
+            $lblProgress.Visible = $false
+            $lblPercent.Visible  = $false
+
+            $pnlActionButtons.Location = New-Object System.Drawing.Point(24, 90)
+            $pnlControls.Height        = 205
+
+            $lblNotice.Visible        = $true
+            $pnlActionButtons.Visible = $true
+        }
+    })
+
+    $form.Add_Shown({
+        $syncHash.IsGuiReady = $true
+        $timer.Start()
+    })
+
+    $form.Add_FormClosing({
+        param($sender, $e)
+        $syncHash.IsClosing = $true
+        $timer.Stop()
+        $timer.Dispose()
+    })
+
+    [void]$form.ShowDialog()
+    $form.Dispose()
 }
 
 # =========================================================================
@@ -4129,7 +4386,7 @@ function Show-Banner {
     )
 
 	$LogCmd = if ($ConsoleOnly) {
-        { Write-Host $args[0] -ForegroundColor $args[1] }
+        { Write-GuiHost $args[0] -ForegroundColor $args[1] }
     } else {
         { Log-Output -Text $args[0] -Color $args[1] }
     }
@@ -4155,7 +4412,7 @@ function Show-Banner {
 }
 
 function PrintLargeOverallResult ($result) {
-    Write-Host "=======================================================================" -ForegroundColor Blue
+    Write-GuiHost "=======================================================================" -ForegroundColor Blue
 
     if ($result -eq 'PASS') {
         $ascii = @'
@@ -4165,7 +4422,7 @@ function PrintLargeOverallResult ($result) {
  |  __/ ___ \ ___) |___) |
  |_| /_/   \_\____/|____/ 
 '@
-        Write-Host $ascii -ForegroundColor Green
+        Write-GuiHost $ascii -ForegroundColor Green
 
     } elseif ($result -eq 'FAIL') {
         $ascii = @'
@@ -4175,7 +4432,7 @@ function PrintLargeOverallResult ($result) {
  |  _/ ___ \| || |___ 
  |_|/_/   \_\___|_____|
 '@
-        Write-Host $ascii -ForegroundColor Red
+        Write-GuiHost $ascii -ForegroundColor Red
 
 	} elseif ($result -eq 'UNKNOWN') {
 		$ascii = @'
@@ -4186,12 +4443,12 @@ function PrintLargeOverallResult ($result) {
  \___/|_| \_|_|\_\_| \_|\___/  \_/\_/    |_| \_|
 '@
 
-		Write-Host $ascii -ForegroundColor Yellow
+		Write-GuiHost $ascii -ForegroundColor Yellow
 	}
 }
 
 function Show-UIOutput ($Data) {
-    Clear-Host
+	Clear-GuiHost
 
     Show-Banner -OverallPassResult $Data.OverallPassResult -ConsoleOnly
 
@@ -4494,12 +4751,12 @@ function Show-UIOutput ($Data) {
 	}
 
     if ($Data.OverallPassResult -eq 1) {
-		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
+		Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
     }
 
     if ($Data.OverallPassResult -eq 0) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
-		Write-Host "Reminder - Ensure you are on the latest BIOS and have reset/cleared the TPM. Start Menu->type tpm.msc and Clear TPM." -ForegroundColor Yellow
+		Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
 
         if ($Data.certRaw) {
             $certOut -split "`r?`n" | ForEach-Object {
@@ -4516,7 +4773,7 @@ function Show-UIOutput ($Data) {
     }
 
     $global:ClipboardBuffer | Set-Clipboard
-    Write-Host "`nAll information has been copied to your clipboard ready to paste into a forum!" -ForegroundColor Cyan
+    Write-GuiHost "`nAll information has been copied to your clipboard ready to paste into a forum!" -ForegroundColor Cyan
 }
 
 # =========================================================================
@@ -4524,15 +4781,17 @@ function Show-UIOutput ($Data) {
 # =========================================================================
 
 function Invoke-MainExecution {
-	$timer = [System.Diagnostics.Stopwatch]::StartNew()
-	$job = $true
-	if (!$global:isTest){
-		$job = Test-DismHealthAsync
-	}
+    $ShouldExit = { return ($null -ne $syncHash -and $syncHash.IsClosing) }
+
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $job = $true
+    if (!$global:isTest){
+        $job = Test-DismHealthAsync
+    }
 
     $global:platforms = Get-PlatformInstallStatus
 
-	$originalOS = "Unknown"
+    $originalOS = "Unknown"
     $subVersion = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "SubVersion" -ErrorAction SilentlyContinue
     $buildLab   = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "BuildLabEx" -ErrorAction SilentlyContinue
 
@@ -4542,95 +4801,113 @@ function Invoke-MainExecution {
         $originalOS = "Windows 11"
     } elseif ($buildLab) {
         $buildNumber = ($buildLab.BuildLabEx -split "\.")[0]
-		$parsedBuild = 0
+        $parsedBuild = 0
         if ([int]::TryParse($buildNumber, [ref]$parsedBuild)) {
             if ($parsedBuild -ge 22000) { $originalOS = "Windows 11" } else { $originalOS = "Windows 10" }
         }
     }
 
-	$parsedTpmObject = Convert-TpmStringToObject -TpmString $env:TpmDeviceData
-	$parsedTpmToolTypeObject = Get-TpmToolTypeMessage -HelpText $env:TpmToolType
+    $parsedTpmObject = Convert-TpmStringToObject -TpmString $env:TpmDeviceData
+    $parsedTpmToolTypeObject = Get-TpmToolTypeMessage -HelpText $env:TpmToolType
 
-    $systemData = [PSCustomObject]@{
-		CpuInfo               = $(Step-Progress; Get-CpuCompliance)
-		NvidiaDriver          = $(Step-Progress; Get-NvidiaDriverVersion)
-		AmdDriver             = $(Step-Progress; Get-AmdDriverVersion)
-		ChipsetVersion        = $(Step-Progress; Get-ChipsetDriverVersion)
-		RamSlots              = $(Step-Progress; Get-RamDetails)
-		Mobo                  = $(Step-Progress; Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version })
-		BiosInfo              = $(Step-Progress; Get-BiosCompliance)
-		SecureBoot            = $(Step-Progress; Get-SecureBootStatus)
-		SecureBootType        = $(Step-Progress; Get-SecureBootSetupType)
-		SbKeys                = $(Step-Progress; Get-SecureBootKeysType)
-		MicrosoftCa           = $(Step-Progress; Get-MicrosoftCaStatus)
-		SocialMedia_UEFICA2023= $(Step-Progress; Test-SocialMedia_UEFICA2023)
-		CsmInfo               = $(Step-Progress; Get-CsmStatus)
-		TpmInfo               = $(Step-Progress; Get-TpmStatus)
-		TpmOwnership          = $(Step-Progress; Get-TpmOwnershipState)
-		ActivisionKey         = $(Step-Progress; Get-ActivisionKeyStatus)
-		GetEvent1040Details   = $(Step-Progress; Get-Event1040Details)
-		TestLocalAttestation  = $(Step-Progress; Test-LocalAttestation)
-		CodBroker             = $(Step-Progress; Get-CodBrokerStatus)
-		Randgrid              = $(Step-Progress; Get-RandgridRegistryAndDriverInfo)
-		BrokerExe             = $(Step-Progress; Get-CODBrokerInfo)
-		BatteryInfo           = $(Step-Progress; Get-BatteryStatus)
-		PartitionStyle        = $(Step-Progress; Get-DiskPartitionStyle)
-		CoreIsolation         = $(Step-Progress; Get-CoreIsolationHardwareStatus)
-		IntelMeVersion        = $(Step-Progress; Get-IntelMeVersion)
-		EventId87			  = $(Step-Progress; Get-EventId87)
-		TpmEndorsement        = $(Step-Progress; Get-TpmEndorsementCertStatus)
-		OriginalOSBuild       = $(Step-Progress; $originalOS)
-		DaysSinceInstall      = $(Step-Progress; [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays))
-		BitLocker             = $(Step-Progress; Get-BitLockerStatus)
-		ExtendedTpmProperties = $(Step-Progress; $parsedTpmObject)
-		LocalAttest           = $(Step-Progress; Get-LocalAttestationStatus)
-		parsedTpmToolType     = $(Step-Progress; $parsedTpmToolTypeObject)
-		IntelBiosInfo         = $(Step-Progress; Get-IntelBiosCompliance)
-		MeasuredBootCompliance = $(Step-Progress; Test-SecurityCompliance -DecodedLog (Invoke-TpmLogParser))
-		CurrentOS             = $(Step-Progress; (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
-		PowerShellVer		  = $(Step-Progress; Get-PowerShellVersion)
-		OSSubVersion          = $(Step-Progress; Get-WindowsSubVersion)
-		OSSupported           = $(Step-Progress; Get-Win10SupportStatus)
-		PcModel               = $(Step-Progress; Get-PcModel)
-		doesThirdPartySecurityExist = $(Step-Progress; Get-DoesThirdPartySecurityExist)
-		CompatibilityFlags    = $(Step-Progress; Test-CompatibilityFlag)
-		CodBrokerLog          = $(Step-Progress; Get-CallOfDutyLogStatus)
-		CodBootstrapperStatus = $(Step-Progress; Get-CallOfDutyBootstrapperStatus)
-		CodBrokerCycleStatus  = $(Step-Progress; Invoke-CodBrokerCycle)
-		UACLevel              = $(Step-Progress; Get-UacStatus)
-		Sha256                = $(Step-Progress; Test-TPMSha256Support)
-		TestMSI               = $(Step-Progress; Test-MSI)
-		AgesaVersion          = $(Step-Progress; Get-AgesaVersion)
-		HasEK			      = $(Step-Progress; HasEK)
-		LatestUpdatesSummary  = $(Step-Progress; Get-LatestUpdatesSummary)
-		ScoreShims 		      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedShims)
-		ScoreRecentShims      = $(Step-Progress; Get-DbxRevocationScore -Hashes $RevokedRecentShims -DisplayType Count)
-		EfiBootSignature      = $(Step-Progress; Get-EfiBootSignature)
-		MotherboardSwap       = $(Step-Progress; Test-MotherboardSwap)
-		IntermediateCerts     = $(Step-Progress; Get-RegIntermediateCerts)
-		IsWindowsBootFirst    = $(Step-Progress; Test-IsWindowsBootFirst)
-		UefiGrubShimEntry     = $(Step-Progress; Test-UefiGrubShimEntry)
+    $ExecStep = {
+        param([scriptblock]$ScriptBlock)
+        if (&$ShouldExit) { return $null }
+        Step-Progress
+        return (&$ScriptBlock)
     }
 
-	$CertreqAttestation = Get-CertreqAttestation -Data $systemData
-	$Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.CertRaw) -or (Is-Pluton)
-	$TpmEkChainInfo     = Get-TpmEkChainInfo -Privacy $true -Key $CertreqAttestation.KeyID
+    $systemData = [PSCustomObject]@{
+        CpuInfo                = & $ExecStep { Get-CpuCompliance }
+        NvidiaDriver           = & $ExecStep { Get-NvidiaDriverVersion }
+        AmdDriver              = & $ExecStep { Get-AmdDriverVersion }
+        ChipsetVersion         = & $ExecStep { Get-ChipsetDriverVersion }
+        RamSlots               = & $ExecStep { Get-RamDetails }
+        Mobo                   = & $ExecStep { Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version } }
+        BiosInfo               = & $ExecStep { Get-BiosCompliance }
+        SecureBoot             = & $ExecStep { Get-SecureBootStatus }
+        SecureBootType         = & $ExecStep { Get-SecureBootSetupType }
+        SbKeys                 = & $ExecStep { Get-SecureBootKeysType }
+        MicrosoftCa            = & $ExecStep { Get-MicrosoftCaStatus }
+        SocialMedia_UEFICA2023 = & $ExecStep { Test-SocialMedia_UEFICA2023 }
+        CsmInfo                = & $ExecStep { Get-CsmStatus }
+        TpmInfo                = & $ExecStep { Get-TpmStatus }
+        TpmOwnership           = & $ExecStep { Get-TpmOwnershipState }
+        ActivisionKey          = & $ExecStep { Get-ActivisionKeyStatus }
+        GetEvent1040Details    = & $ExecStep { Get-Event1040Details }
+        TestLocalAttestation   = & $ExecStep { Test-LocalAttestation }
+        CodBroker              = & $ExecStep { Get-CodBrokerStatus }
+        Randgrid               = & $ExecStep { Get-RandgridRegistryAndDriverInfo }
+        BrokerExe              = & $ExecStep { Get-CODBrokerInfo }
+        BatteryInfo            = & $ExecStep { Get-BatteryStatus }
+        PartitionStyle         = & $ExecStep { Get-DiskPartitionStyle }
+        CoreIsolation          = & $ExecStep { Get-CoreIsolationHardwareStatus }
+        IntelMeVersion         = & $ExecStep { Get-IntelMeVersion }
+        EventId87              = & $ExecStep { Get-EventId87 }
+        TpmEndorsement         = & $ExecStep { Get-TpmEndorsementCertStatus }
+        OriginalOSBuild        = & $ExecStep { $originalOS }
+        DaysSinceInstall       = & $ExecStep { [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays) }
+        BitLocker              = & $ExecStep { Get-BitLockerStatus }
+        ExtendedTpmProperties  = & $ExecStep { $parsedTpmObject }
+        LocalAttest            = & $ExecStep { Get-LocalAttestationStatus }
+        parsedTpmToolType      = & $ExecStep { $parsedTpmToolTypeObject }
+        IntelBiosInfo          = & $ExecStep { Get-IntelBiosCompliance }
+        MeasuredBootCompliance = & $ExecStep { Test-SecurityCompliance -DecodedLog (Invoke-TpmLogParser) }
+        CurrentOS              = & $ExecStep { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption }
+        PowerShellVer          = & $ExecStep { Get-PowerShellVersion }
+        OSSubVersion           = & $ExecStep { Get-WindowsSubVersion }
+        OSSupported            = & $ExecStep { Get-Win10SupportStatus }
+        PcModel                = & $ExecStep { Get-PcModel }
+        doesThirdPartySecurityExist = & $ExecStep { Get-DoesThirdPartySecurityExist }
+        CompatibilityFlags     = & $ExecStep { Test-CompatibilityFlag }
+        CodBrokerLog           = & $ExecStep { Get-CallOfDutyLogStatus }
+        CodBootstrapperStatus  = & $ExecStep { Get-CallOfDutyBootstrapperStatus }
+        CodBrokerCycleStatus   = & $ExecStep { Invoke-CodBrokerCycle }
+        UACLevel               = & $ExecStep { Get-UacStatus }
+        Sha256                 = & $ExecStep { Test-TPMSha256Support }
+        TestMSI                = & $ExecStep { Test-MSI }
+        AgesaVersion           = & $ExecStep { Get-AgesaVersion }
+        HasEK                  = & $ExecStep { HasEK }
+        LatestUpdatesSummary   = & $ExecStep { Get-LatestUpdatesSummary }
+        ScoreShims             = & $ExecStep { Get-DbxRevocationScore -Hashes $RevokedShims }
+        ScoreRecentShims       = & $ExecStep { Get-DbxRevocationScore -Hashes $RevokedRecentShims -DisplayType Count }
+        EfiBootSignature       = & $ExecStep { Get-EfiBootSignature }
+        MotherboardSwap        = & $ExecStep { Test-MotherboardSwap }
+        IntermediateCerts      = & $ExecStep { Get-RegIntermediateCerts }
+        IsWindowsBootFirst     = & $ExecStep { Test-IsWindowsBootFirst }
+        UefiGrubShimEntry      = & $ExecStep { Test-UefiGrubShimEntry }
+    }
 
-	$systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
-	$systemData | Add-Member -NotePropertyName "OverallPassResult" -NotePropertyValue $CertreqAttestation.OverallPassResult
-	$systemData | Add-Member -NotePropertyName "IsOverallAIKPass" -NotePropertyValue $CertreqAttestation.IsOverallAIKPass
-	$systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
-	$systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
-	$systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
-	$systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
-	$systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
+    if (&$ShouldExit) { return $null }
 
-	write-host "Checking Windows DISM.. May take a minute." -ForegroundColor White
-	if (!$global:isTest) {
+    $CertreqAttestation = Get-CertreqAttestation -Data $systemData
+    $Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.CertRaw) -or (Is-Pluton)
+    $TpmEkChainInfo     = Get-TpmEkChainInfo -Privacy $true -Key $CertreqAttestation.KeyID
+
+    $systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
+    $systemData | Add-Member -NotePropertyName "OverallPassResult" -NotePropertyValue $CertreqAttestation.OverallPassResult
+    $systemData | Add-Member -NotePropertyName "IsOverallAIKPass" -NotePropertyValue $CertreqAttestation.IsOverallAIKPass
+    $systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
+    $systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
+    $systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
+    $systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
+    $systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
+
+    if (&$ShouldExit) { return $null }
+
+    Write-GuiHost "Checking Windows DISM.. May take a minute." -ForegroundColor White
+    if (!$global:isTest) {
         $timeoutSeconds = 110
         $dismDeadlineSeconds = $timer.Elapsed.TotalSeconds + $timeoutSeconds
 
         while ($job.State -eq 'Running' -and $timer.Elapsed.TotalSeconds -lt $dismDeadlineSeconds) {
+            # Immediate break if user closes window mid-loop
+            if (&$ShouldExit) {
+                Stop-Job -Job $job -ErrorAction SilentlyContinue
+                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                return $null
+            }
+
             $lastProgress = $job.ChildJobs[0].Progress | Select-Object -Last 1
             $secondsRemaining = [math]::Max(0, [int]($dismDeadlineSeconds - $timer.Elapsed.TotalSeconds))
 
@@ -4640,7 +4917,7 @@ function Invoke-MainExecution {
                 "Running health check..."
             }
 
-            Write-Progress -Activity "Checking Windows DISM" `
+            Set-GuiProgress -Activity "Checking Windows DISM" `
                            -Status "$statusText (Timeout in ${secondsRemaining}s)" `
                            -CurrentOperation "Total execution time: $([int]$timer.Elapsed.TotalSeconds)s" `
                            -PercentComplete ($lastProgress.PercentComplete)
@@ -4648,27 +4925,64 @@ function Invoke-MainExecution {
             Start-Sleep -Milliseconds 500
         }
 
-        Write-Progress -Activity "Checking Windows DISM" -Completed
+        Set-GuiProgress -Activity "Checking Windows DISM" -Completed
 
         if ($job.State -eq 'Running') {
-            Stop-Job -Job $job
-            Remove-Job -Job $job
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
             $job = "NA"
         }
     }
 
-	$timer.Stop()
-	$systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
+    $timer.Stop()
+    $systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
+
+    if (&$ShouldExit) { return $null }
+
+    Set-GuiProgress -Status "Progress" -Percent 100 -Activity "TPM Attestation Status"
+    $syncHash.AttestationPass = $systemData.OverallPassResult
+    $syncHash.IsCompleted     = $true
+    $syncHash.CurrentPercent  = 100
 
     Show-UIOutput -Data $systemData
-	return $systemData
+    return $systemData
 }
 
 if ($TestFile -eq "-fix") {
 	Show-FixMenu
 }else{
+	$rs = [runspacefactory]::CreateRunspace()
+	$rs.ApartmentState = 'STA'
+	$rs.Open()
+
+	$ps = [powershell]::Create()
+	$ps.Runspace = $rs
+	$null = $ps.AddScript($guiScript).AddArgument($syncHash)
+
+	# Launch GUI asynchronously
+	$asyncGuiResult = $ps.BeginInvoke()
+
+	while (-not $syncHash.IsGuiReady) {
+		Start-Sleep -Milliseconds 100
+	}
+	Show-UpdateMessage
+
 	$Data = Invoke-MainExecution
+	if ($null -eq $Data) { return $null }
+
 	Show-UserRecommendedSteps -Data $Data
 	Check-CodBrokerService -Data $Data
-	Show-TpmGuiFormMessage -attestationPass $Data.OverallPassResult
+
+	while (-not $asyncGuiResult.IsCompleted) {
+        Start-Sleep -Milliseconds 200
+    }
+
+	try {
+		$null = $ps.EndInvoke($asyncGuiResult)
+	} catch {}
+	finally {
+		$ps.Dispose()
+		$rs.Close()
+		$rs.Dispose()
+	}
 }
