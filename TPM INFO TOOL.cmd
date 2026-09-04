@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 67
+$global:TotalSteps = 68
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -676,6 +676,10 @@ function Get-AtviServiceInfo {
         Data      = $results
         AnyFailed = $anyFailed
     }
+}
+
+function Test-FaceitService {
+    Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\FACEITService"
 }
 
 function Get-PlatformInstallStatus {
@@ -4543,6 +4547,10 @@ function Show-UIOutput ($Data) {
         Log-Output "[PASS] Ricochet" 'Green'
     }
 
+    if ($Data.FaceitService) {
+        Log-Output 'FaceIT Found'
+    }
+
     if ($Data.CompatibilityFlags.Passed) {
         Log-Output "[PASS] Compatibility flags are clear." 'Green'
     } else {
@@ -4908,6 +4916,7 @@ function Invoke-MainExecution {
         IntermediateCerts      = & $ExecStep { Get-RegIntermediateCerts }
         IsWindowsBootFirst     = & $ExecStep { Test-IsWindowsBootFirst }
         UefiGrubShimEntry      = & $ExecStep { Test-UefiGrubShimEntry }
+        FaceitService          = & $ExecStep { Test-FaceitService }
     }
 
     if (&$ShouldExit) { return $null }
