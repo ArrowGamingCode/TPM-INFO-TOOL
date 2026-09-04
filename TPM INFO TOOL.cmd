@@ -577,89 +577,104 @@ function Get-CodBrokerStatus {
     }
 }
 
-function Get-RandgridRegistryAndDriverInfo {
+function Get-AtviServiceInfo {
+    $servicesPath = 'SYSTEM\CurrentControlSet\Services'
     $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+    $servicesKey = $baseKey.OpenSubKey($servicesPath)
 
-    $platforms = @{
-        'Steam'      = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid_sr'
-        'Xbox/Store' = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid_msstore'
-        'Battle.net' = 'SYSTEM\CurrentControlSet\Services\atvi-randgrid'
+    if (-not $servicesKey) {
+        return [PSCustomObject]@{
+            Data      = $null
+            AnyFailed = $true
+        }
     }
 
-    $allResults = @()
-    $foundList  = @()
-    $charsList  = @()
-    $md5List    = @()
+    $driverQueryRaw = driverquery /v /fo csv | ConvertFrom-Csv 2>$null
+    $atviKeys = $servicesKey.GetSubKeyNames() | Where-Object { $_ -like 'atvi-*' }
 
-    foreach ($platform in $platforms.Keys) {
-        $subKeyPath = $platforms[$platform]
-        $regKey     = $baseKey.OpenSubKey($subKeyPath)
+    $results = foreach ($keyName in $atviKeys) {
+        $subKey = $servicesKey.OpenSubKey($keyName)
+        $imagePath = $subKey.GetValue('ImagePath')
+        $subKey.Close()
 
-        $results = [PSCustomObject]@{
-            Platform           = $platform
-            RegKeyExists       = $null -ne $regKey
-            FirstChars         = 'N/A'
-            ImagePath          = 'N/A'
-            RandgridFileExists = $false
-            Md5Hash            = ''
+        $cleanServiceName = $keyName -replace '^atvi-', ''
+
+        $storeType = if ($keyName -like '*_sr') {
+            'S'
+        } elseif ($keyName -like '*_msstore') {
+            'M'
+        } else {
+            'B'
         }
 
-        if ($results.RegKeyExists) {
-            $foundList += $platform
-            $imagePath = $regKey.GetValue('ImagePath')
-            if ($imagePath) {
-                $results.ImagePath  = $imagePath
-                $results.FirstChars = if ($imagePath.Length -ge 6) { $imagePath.Substring(4,2) } else { $imagePath }
-                $charsList += $results.FirstChars
+        $driveLetter = 'N/A'
+        $fullPath    = 'N/A'
+        $fileExists  = $false
+        $md5Prefix   = 'N/A'
 
-                $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
+        if ($imagePath) {
+            $cleanPath = $imagePath -replace '^\\[\?]{2}\\', '' -replace '^\\\\\\\?\\\\', ''
 
-                if ($cleanPath -notmatch '^[A-Za-z]:') {
-                    $cleanPath = Join-Path $env:SystemRoot $cleanPath
-                }
+            if ($cleanPath -notmatch '^[A-Za-z]:') {
+                $cleanPath = Join-Path $env:SystemRoot $cleanPath
+            }
 
-                if (Test-Path $cleanPath) {
-                    $results.RandgridFileExists = $true
-                        try {
-                            $hash = (Get-FileHash -Path $cleanPath -Algorithm MD5).Hash.Substring(0, 2)
-                            $results.Md5Hash = $hash
-                            $md5List += $hash
-                        } catch {
-                        }
+            $fullPath = $cleanPath
+
+            if ($cleanPath -match '^([A-Za-z]):') {
+                $driveLetter = $Matches[1].ToUpper()
+            }
+
+            if (Test-Path -Path $cleanPath) {
+                $fileExists = $true
+                try {
+                    $md5Prefix = (Get-FileHash -Path $cleanPath -Algorithm MD5).Hash.Substring(0, 2)
+                } catch {
+                    $md5Prefix = 'Error'
                 }
             }
-            $regKey.Close()
         }
-        $allResults += $results
+
+        $driverMatch = $driverQueryRaw | Where-Object { $_.'Module Name' -eq $keyName }
+
+        if (-not $driverMatch -and $fullPath -ne 'N/A') {
+            $fileName = [System.IO.Path]::GetFileNameWithoutExtension($fullPath)
+            $driverMatch = $driverQueryRaw | Where-Object { $_.'Module Name' -eq $fileName }
+        }
+
+        $driverQueryFound = $null -ne $driverMatch
+        $driverStatus     = if ($driverQueryFound) {
+            ($driverMatch.State | Select-Object -Unique) -join ', '
+        } else {
+            'Not Loaded'
+        }
+
+        $fileExistsTF       = if ($fileExists) { 'T' } else { 'F' }
+        $driverQueryFoundTF = if ($driverQueryFound) { 'T' } else { 'F' }
+        $isPassed           = ($fileExists -and $driverQueryFound)
+
+        [PSCustomObject]@{
+            ServiceName      = $cleanServiceName
+            Store            = $storeType
+            Drive            = $driveLetter
+            FileExists       = $fileExistsTF
+            MD5              = $md5Prefix
+            Driver           = $driverQueryFoundTF
+            Status           = $driverStatus
+            FullPath         = $fullPath
+            Passed           = $isPassed
+        }
     }
 
+    $servicesKey.Close()
     $baseKey.Close()
 
-    $platformsString = if ($foundList.Count -gt 0) {
-        ($foundList | ForEach-Object { $_.Substring(0,1) }) -join ', '
-    } else {
-        'None'
-    }
-
-    $allCharsString = if ($charsList.Count -gt 0) {
-        ($charsList | Select-Object -Unique) -join ' '
-    } else {
-        'N/A'
-    }
-
-    $allMd5sString = if ($md5List.Count -gt 0) {
-        ($md5List | Select-Object -Unique) -join ' '
-    } else {
-        ''
-    }
+    $resultsArray = @($results)
+    $anyFailed = ($resultsArray.Count -eq 0) -or [bool]($resultsArray | Where-Object { -not $_.Passed })
 
     return [PSCustomObject]@{
-        RegKeyExists       = @($allResults | Where-Object { $_.RegKeyExists }).Count -gt 0
-        RandgridFileExists = @($allResults | Where-Object { $_.RandgridFileExists }).Count -gt 0
-        FirstChars         = $allCharsString
-        PlatformsFound     = $platformsString
-        AllPlatforms       = $allResults
-        AllMd5s            = $allMd5sString
+        Data      = $results
+        AnyFailed = $anyFailed
     }
 }
 
@@ -3142,22 +3157,27 @@ function Print-PCRTable {
     Log-Output ""
 }
 
-function Log-Output ($Text, $Color = "White", $NoNewLine = $false) {
+function Log-Output ($Text, $Color = "White", $NoNewLine = $false, [bool]$ConsoleOnly = $false) {
     if ($NoNewLine) {
-        Write-GuiHost $Text  -ForegroundColor $Color -NoNewline
-        $global:ClipboardBuffer += $Text
+        Write-GuiHost $Text -ForegroundColor $Color -NoNewline
     } else {
         Write-GuiHost $Text -ForegroundColor $Color
-        $global:ClipboardBuffer += "$Text`r`n"
     }
 
-    $syncHash.ImageBuffer.Add([PSCustomObject]@{
-        Text      = $Text
-        Color     = $Color
-        NoNewLine = $NoNewLine
-    })
-}
+    if (-not $ConsoleOnly) {
+        if ($NoNewLine) {
+            $global:ClipboardBuffer += $Text
+        } else {
+            $global:ClipboardBuffer += "$Text`r`n"
+        }
 
+        $syncHash.ImageBuffer.Add([PSCustomObject]@{
+            Text      = $Text
+            Color     = $Color
+            NoNewLine = $NoNewLine
+        })
+    }
+}
 function Set-GuiProgress {
     [CmdletBinding()]
     param(
@@ -4517,16 +4537,10 @@ function Show-UIOutput ($Data) {
         Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow'
     }
 
-    if ($Data.Randgrid.RegKeyExists -and $Data.Randgrid.RandgridFileExists) {
-        Log-Output "[PASS] Randgrid File & Registry Key Exists: [$($Data.Randgrid.FirstChars)] : [$($Data.Randgrid.PlatformsFound)] : [$($Data.Randgrid.AllMd5s)]" 'Green'
+    if ($Data.Randgrid.AnyFailed) {
+        Log-Output '[FAIL] Ricochet install issues' 'Red'
     } else {
-        if (-not $Data.Randgrid.RegKeyExists) {
-            Log-Output 'CRITICAL: Randgrid Registry Key Missing' 'Red'
-        }
-
-        if (-not $Data.Randgrid.RandgridFileExists) {
-            Log-Output 'CRITICAL: Randgrid.sys File Missing from Path' 'Red'
-        }
+        Log-Output "[PASS] Ricochet" 'Green'
     }
 
     if ($Data.CompatibilityFlags.Passed) {
@@ -4627,6 +4641,27 @@ function Show-UIOutput ($Data) {
 
     Log-Output "INFO: EK: $($Data.HasEK)"
     Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
+
+    $consoleOption = $true
+    if ($Data.Randgrid.AnyFailed) {
+        $consoleOption = $false
+    }
+
+    $atviData = $Data.Randgrid.Data
+
+    if ($atviData) {
+        Log-Output "`n--- Anticheat ---" 'Cyan' $false -ConsoleOnly:$consoleOption
+        $displayObjects = $atviData | Select-Object ServiceName, Store, Drive, FileExists, MD5, Driver, Status
+        $formattedLines = ($displayObjects | Format-Table -AutoSize | Out-String) -split "`r?\n" | Where-Object { $_ -ne '' }
+
+        Log-Output $formattedLines[0] 'White' $false $consoleOption
+
+        for ($i = 0; $i -lt $atviData.Count; $i++) {
+            $color = if ($atviData[$i].Passed) { 'Green' } else { 'Red' }
+            Log-Output $formattedLines[$i + 2] $color $false $consoleOption
+        }
+    }
+
 
     Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
 
@@ -4834,7 +4869,7 @@ function Invoke-MainExecution {
         GetEvent1040Details    = & $ExecStep { Get-Event1040Details }
         TestLocalAttestation   = & $ExecStep { Test-LocalAttestation }
         CodBroker              = & $ExecStep { Get-CodBrokerStatus }
-        Randgrid               = & $ExecStep { Get-RandgridRegistryAndDriverInfo }
+        Randgrid               = & $ExecStep { Get-AtviServiceInfo }
         BrokerExe              = & $ExecStep { Get-CODBrokerInfo }
         BatteryInfo            = & $ExecStep { Get-BatteryStatus }
         PartitionStyle         = & $ExecStep { Get-DiskPartitionStyle }
