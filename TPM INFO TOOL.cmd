@@ -52,7 +52,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 68
+$global:TotalSteps = 70
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -2791,6 +2791,22 @@ function Display-DismMessage {
     Write-GuiHost "========================================================================="
 }
 
+function Test-TpmNoAutoProvisionExists {
+    $Path = "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI"
+    $ValueName = "NoAutoProvision"
+
+    $key = Get-Item -Path $Path -ErrorAction SilentlyContinue
+    return $null -ne $key -and $null -ne $key.GetValue($ValueName)
+}
+
+function Test-TpmDisableStrictValidationExists {
+    $Path = "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography\Platform\TPM"
+    $ValueName = "DisableStrictValidation"
+
+    $key = Get-Item -Path $Path -ErrorAction SilentlyContinue
+    return ($null -ne $key) -and ($null -ne $key.GetValue($ValueName))
+}
+
 # =========================================================================
 # FIX Menu
 # =========================================================================
@@ -4650,6 +4666,13 @@ function Show-UIOutput ($Data) {
     Log-Output "INFO: EK: $($Data.HasEK)"
     Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
+    if($Data.AutoProvision) {
+        Log-Output "[INFO] Reg DisableAutoProvision" 'DarkYellow'
+    }
+    if($Data.StrictValidation) {
+        Log-Output "[INFO] Reg DisableStrictValidation" 'DarkYellow'
+    }
+
     $consoleOption = $true
     if ($Data.Randgrid.AnyFailed) {
         $consoleOption = $false
@@ -4917,6 +4940,8 @@ function Invoke-MainExecution {
         IsWindowsBootFirst     = & $ExecStep { Test-IsWindowsBootFirst }
         UefiGrubShimEntry      = & $ExecStep { Test-UefiGrubShimEntry }
         FaceitService          = & $ExecStep { Test-FaceitService }
+        AutoProvision          = & $ExecStep { Test-TpmNoAutoProvisionExists }
+        StrictValidation       = & $ExecStep { Test-TpmDisableStrictValidationExists }
     }
 
     if (&$ShouldExit) { return $null }
