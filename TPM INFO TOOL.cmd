@@ -957,6 +957,14 @@ function Get-TpmToolTypeMessage {
     }
 }
 
+function Get-PCR1To7Mismatches ($Data) {
+    return $Data.PCRTable | ForEach-Object {
+        if ($_ -match 'PCR\[0?(?<num>[1-7])\]' -and $_ -match 'MISMATCH|Failed|Error') {
+            [int]$Matches['num']
+        }
+    } | Select-Object -Unique
+}
+
 function Get-PCR {
     if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
         $tcgLogValues = [ordered]@{}
@@ -4476,6 +4484,13 @@ function Show-UserRecommendedSteps ($Data) {
     if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.OverallPassResult -eq 0 -and -not (Is-NextGenTPM -Data $Data) -and $Data.CodBroker.Passed) {
         Log-Output "Potential TPM 'state mismatch'." 'Yellow'
         BIOS_TPM_ResetMessage
+        Has-Issue
+    }
+
+    if ($global:HasPCRFailures -and $Data.TestMSI -and $BatteryInfo.Text -eq "Laptop") {
+        if ((Get-PCR1To7Mismatches -Data $Data) -contains 7) {
+            Log-Output "PCR 7 - bootx64.efi - https://www.msi.com/faq/faq-11370" 'Yellow'
+        }
         Has-Issue
     }
 
