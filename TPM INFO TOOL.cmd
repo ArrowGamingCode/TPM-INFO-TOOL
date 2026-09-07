@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.18"
+set "TPM_TOOL_VERSION=1.0.19"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -18,7 +18,17 @@ if %errorLevel% neq 0 (
     exit /b
 )
 
+set "IS_DEV_MODE=0"
+set "IS_UNINSTALL_MODE=0"
+for %%A in (%*) do (
+    if /i "%%A"=="-dev" set "IS_DEV_MODE=1"
+    if /i "%%A"=="-uninstall" set "IS_UNINSTALL_MODE=1"
+)
+
 set "TPM_TEST_FILE=%~1"
+
+set "PS_WINDOW_STYLE=Hidden"
+if not "%~1"=="" set "PS_WINDOW_STYLE=Normal"
 
 cls
 echo Please wait while system information is retrieved...
@@ -33,7 +43,7 @@ chcp %ORIGINAL_CP% >nul
 
 echo Stage 1 done.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0' -Raw) -join [Environment]::NewLine)"
+powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle %PS_WINDOW_STYLE% -Command "iex ((Get-Content '%~f0' -Raw) -join [Environment]::NewLine)"
 exit /b
 
 :CollapseCommandOutput
@@ -52,7 +62,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 70
+$global:TotalSteps = 73
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -77,10 +87,13 @@ $syncHash = [hashtable]::Synchronized(@{
     CurrentStatus   = "Starting GUI..."
     IsCompleted     = $false
     IsGuiReady      = $false
+    devMode         = $env:IS_DEV_MODE -eq "1"
+    IsClosing       = $false
+    WebUrl          = ""
+    PCID            = ""
+    Data            = $null
+
     enableUploadFeature = $true
-    IsClosing    = $false
-    WebUrl       = ""
-    PCID      = ""
 
     ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
     DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
@@ -1853,7 +1866,7 @@ function Test-SecurityCompliance {
 
 function Show-TcgAttestationAudit ($Data) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
-    Show-PCR_Message
+    Show-PCR_Message $Data
 
     if($Data.MeasuredBootCompliance.pass){
         Log-Output $Data.MeasuredBootCompliance.message 'Green'
@@ -2110,6 +2123,11 @@ function Get-TpmEkChainInfo {
     }
 }
 
+function Test-PostRebootScript {
+    $path = "C:\ProgramData\TPM-INFO-TOOL\PostReboot.ps1"
+    return Test-Path -Path $path
+}
+
 function Test-CompatibilityFlag {
     [CmdletBinding()]
     param(
@@ -2152,7 +2170,7 @@ function Test-CompatibilityFlag {
 }
 
 function Get-CallOfDutyLogStatus {
-    $LogPath = "C:\ProgramData\Activision\Call of Duty\broker_service.log"
+    $LogPath = "$env:ProgramData\Activision\Call of Duty\broker_service.log"
 
     if (Test-Path $LogPath) {
         $LogFile = Get-Item $LogPath
@@ -2352,10 +2370,6 @@ function Is-NextGenTPM {
         return $true
     }
 
-    if ($Data.CpuInfo.IsCoreUltra) {
-        return $true
-    }
-
     if ($Data.CpuInfo.IsRyzenAI) {
         if (-not $data.HasEK) {
             return $true
@@ -2396,7 +2410,7 @@ function Compare-TpmKeyId {
 }
 
 function Get-CODBrokerInfo {
-    $filePath = 'C:\ProgramData\Activision\Call of Duty\CODBrokerService.exe'
+    $filePath = "$env:ProgramData\Activision\Call of Duty\CODBrokerService.exe"
 
     if (Test-Path -Path $filePath) {
         $brokerVersion = (Get-ItemProperty -Path $filePath).VersionInfo.FileVersion
@@ -2772,17 +2786,9 @@ function Get-RegIntermediateCerts {
     }
 }
 
-function Test-DismHealthAsync {
-    return Start-Job -ScriptBlock {
-        $result = Repair-WindowsImage -Online -ScanHealth
-
-        if ($result.ImageHealth -ne 'Healthy') {
-            ViewWindowsComponentRepairedIssues -LogTarget 'Log-Data'
-            return $false
-        }
-
-        return $true
-    }
+function Test-DismHealth {
+    $result = Repair-WindowsImage -Online -CheckHealth
+    return $result.ImageHealthState -eq 'Healthy'
 }
 
 function Display-DismMessage {
@@ -2805,90 +2811,6 @@ function Test-TpmDisableStrictValidationExists {
 
     $key = Get-Item -Path $Path -ErrorAction SilentlyContinue
     return ($null -ne $key) -and ($null -ne $key.GetValue($ValueName))
-}
-
-# =========================================================================
-# FIX Menu
-# =========================================================================
-
-function Show-FixMenu {
-    param (
-        [string]$Message = ""
-    )
-
-    Clear-Host
-    Write-Host "             TPM INFO TOOL - FIX MENU         " -ForegroundColor Cyan -BackgroundColor DarkCyan
-    Write-Host "=============================================" -ForegroundColor Cyan
-
-    if (-not [string]::IsNullOrEmpty($Message)) {
-        Write-Host "NOTE: $Message" -ForegroundColor Yellow
-        Write-Host "=============================================" -ForegroundColor Cyan
-    }
-
-    Write-Host "Please only run this if you have been asked to:"  -ForegroundColor White
-    Write-Host "1) Reset Windows TPM Cache"                       -ForegroundColor White
-    Write-Host "2) Attempt to install UEFI CA 2023"               -ForegroundColor White
-    Write-Host "3) Delete Activision Key"                         -ForegroundColor White
-    Write-Host "4) Print PCR Table"                               -ForegroundColor White
-    Write-Host "5) Print DBX Table"                               -ForegroundColor White
-    Write-Host "6) Repair Windows Component Store"                -ForegroundColor White
-    Write-Host "7) View Windows Component Repaired Issues"        -ForegroundColor White
-    Write-Host "8) View Intermediate Cert Details"                -ForegroundColor White
-    Write-Host "9) Intel CSME check"                              -ForegroundColor White
-
-    Write-Host "Q) Quit"                                          -ForegroundColor Red
-    Write-Host "============================================="    -ForegroundColor Cyan
-
-    $choice = Read-Host "Select an option"
-
-    switch ($choice) {
-        "1" {
-            Reset-WindowsCache
-            Show-FixMenu -Message "TPM Cache Reset completed successfully."
-        }
-        "2" {
-            Set-SecureBoot2023Certificates
-        }
-        "3" {
-            Reset-ActivisionKey
-        }
-        "4" {
-            Print-PCRTable
-            pause
-            Show-FixMenu
-        }
-        "5" {
-            Print-DBX | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap
-            pause
-            Show-FixMenu
-        }
-        "6" {
-            DISM /Online /Cleanup-Image /RestoreHealth
-            pause
-            Show-FixMenu
-        }
-        "7" {
-            ViewWindowsComponentRepairedIssues -LogTarget 'Log-Output'
-            pause
-            Show-FixMenu
-        }
-        "8" {
-            Get-RegIntermediateCerts -LogTarget Log-Output
-            pause
-            Show-FixMenu
-        }
-        "9" {
-            Show-FixMenu -Message "CSME: $(Get-IntelCsmeStatus)"
-        }
-        "Q" {
-            cls
-            exit
-        }
-
-        default {
-            Show-FixMenu -Message "Invalid selection. Please try again."
-        }
-    }
 }
 
 function ViewWindowsComponentRepairedIssues {
@@ -2919,232 +2841,6 @@ function ViewWindowsComponentRepairedIssues {
     }
 }
 
-function Reset-WindowsCache {
-    $Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
-    $Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
-    if (Test-Path $Path1) {
-        Remove-Item -Path $Path1 -Recurse -Force
-    }
-    if (Test-Path $Path2) {
-        Remove-Item -Path $Path2 -Recurse -Force
-    }
-
-    certutil -urlcache * delete
-    Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
-
-    Start-TPM-Maintenance
-
-    for ($i = 10; $i -gt 0; $i--) {
-        Write-Host "`nWaiting for TPM maintenance... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
-        Start-Sleep -Seconds 1
-    }
-
-    Set-GuiProgress -Activity "Waiting" -Completed
-    Write-Host "`nenrollaik.."
-    certreq -q -enrollaik -f -config '""'
-    certutil -pulse
-
-    Write-Host "Actioned" -ForegroundColor Green
-}
-
-function Set-SecureBoot2023Certificates {
-    try {
-        $uefiDb = [System.Text.Encoding]::ASCII.GetString((Get-SecureBootUEFI -Name db).Bytes)
-        if ($uefiDb -match 'Windows UEFI CA 2023') {
-            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY installed. No action required."
-            return
-        }
-    } catch {
-        $status = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing" -ErrorAction SilentlyContinue
-        if ($status.UEFICA2023Status -eq "Updated") {
-            Show-FixMenu -Message "Secure Boot 2023 certificates are ALREADY marked as Updated. No action required."
-            return
-        }
-    }
-
-    Write-Host "WARNING: In rare cases, this may trigger a Secure Boot Violation." -ForegroundColor Yellow
-    Write-Host "Do you wish to continue? (Y/N)" -ForegroundColor Yellow
-
-    $choice = Read-Host "Enter choice"
-
-    if($choice.ToUpper() -eq "Y") {
-
-    }else{
-        Write-Host "Cancelled" -ForegroundColor Yellow
-        return
-    }
-
-    $os = Get-CimInstance Win32_OperatingSystem
-
-    if ($os.Caption -match "Windows 10") {
-        $ubr = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").UBR
-        if ($ubr -lt 4169) {
-            $kbCheck = Get-HotFix -Id "KB5036210" -ErrorAction SilentlyContinue
-            if (-not $kbCheck) {
-                Write-Error "Windows 10 is missing mandatory Secure Boot servicing files. Please run Windows Update first."
-                return
-            }
-        }
-    }
-
-    $blStatus = Get-BitLockerVolume -ErrorAction SilentlyContinue
-    if ($blStatus | Where-Object { $_.VolumeStatus -eq 'Encrypted' -or $_.ProtectionStatus -eq 'On' }) {
-        Write-Warning "Cancelled as BitLocker is ENABLED"
-        return
-    }
-
-    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot"
-    $bitmask = 0x5944
-
-    try {
-        Set-ItemProperty -Path $regPath -Name "AvailableUpdates" -Value $bitmask -Force -ErrorAction Stop
-        Start-ScheduledTask -TaskPath "\Microsoft\Windows\PI\" -TaskName "Secure-Boot-Update" -ErrorAction Stop
-        Write-Host "Success. Reboot your PC twice consecutively." -ForegroundColor Green
-    } catch {
-        Write-Error "Execution failed to push keys to staging: $_"
-    }
-    pause
-}
-
-function Reset-ActivisionKey {
-    try {
-        $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1
-        $index = [array]::FindIndex($keys, [Predicate[object]]{ $args[0] -match "ActivisionAIK" })
-
-        if ($index -ge 0 -and $index -lt ($keys.Count - 1)) {
-            $filePath = $keys[$index + 1].Trim()
-
-            if (Test-Path $filePath) {
-                Rename-Item -Path $filePath -NewName "$($filePath | Split-Path -Leaf).bak" -Force
-                Show-FixMenu -Message "Successfully renamed key file to: $filePath.bak"
-            } else {
-                Show-FixMenu "Key found in certutil, but physical file not found at: $filePath"
-            }
-        } else {
-            Show-FixMenu "ActivisionAIK key not found."
-        }
-    } catch {
-       Show-FixMenu "Error: $($_.Exception.Message)"
-    }
-}
-
-function Print-DBX {
-    $script:dbxData = (Get-SecureBootUEFI -Name dbx -Decoded) | Select-Object `
-        @{N='Authority CN'; E={
-            if ($_.Authority) {
-                $_.Authority -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
-            } elseif ($_.Subject) {
-                $_.Subject -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
-            } else {
-                "N/A (Raw Hash)"
-            }
-        }},
-        @{N='Description'; E={
-            if ($_.Description) { $_.Description }
-            elseif ($_.Company) { $_.Company }
-            else { "N/A" }
-        }},
-        @{N='Hash'; E={
-            if ($_.Hash) { $_.Hash }
-            elseif ($_.Fingerprint) { $_.Fingerprint }
-            else { $_.SerialNumber }
-        }}
-
-    return $script:dbxData
-}
-
-function Get-IntelCsmeStatus {
-    [CmdletBinding()]
-    param ()
-
-    $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
-    if ($cpu.Manufacturer -notlike "*Intel*") {
-        return "NA - CPU"
-    }
-
-    $targetDir   = "C:\ProgramData\Intel\CSME"
-    $targetExe   = Join-Path $targetDir "CSME-Version-Detection-Tool-console.exe"
-    $downloadUrl = "https://downloadmirror.intel.com/28632/eng/CSME_Version_Detection_Tool_Windows.zip"
-    $tempZip     = Join-Path $env:TEMP "CSME_Version_Detection_Tool_Windows.zip"
-    $tempExtract = Join-Path $env:TEMP "CSME_Extract"
-
-    if (-not (Test-Path $targetExe)) {
-        try {
-            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing -TimeoutSec 20
-            Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
-
-            $discoveryFolder = Get-ChildItem -Path $tempExtract -Recurse -Directory -Filter "DiscoveryTool" | Select-Object -First 1
-            if ($discoveryFolder) {
-                Copy-Item -Path "$($discoveryFolder.FullName)\*" -Destination $targetDir -Recurse -Force
-            } else {
-                $exeFile = Get-ChildItem -Path $tempExtract -Recurse -Filter "*.exe" |
-                           Where-Object { $_.Name -like "*CSME*" -or $_.Name -like "*Detection*" } |
-                           Select-Object -First 1
-                if ($exeFile) {
-                    Copy-Item -Path "$($exeFile.DirectoryName)\*" -Destination $targetDir -Recurse -Force
-                } else {
-                    throw "Could not locate DiscoveryTool files."
-                }
-            }
-
-            $docsFolder = Get-ChildItem -Path $tempExtract -Recurse -Directory -Filter "Documents" | Select-Object -First 1
-            if ($docsFolder) {
-                Copy-Item -Path $docsFolder.FullName -Destination $targetDir -Recurse -Force
-            }
-
-            $sourceExe = Get-ChildItem -Path $targetDir -Filter "*.exe" | Select-Object -First 1
-            if ($sourceExe -and $sourceExe.Name -ne "CSME-Version-Detection-Tool-console.exe") {
-                Rename-Item -Path $sourceExe.FullName -NewName "CSME-Version-Detection-Tool-console.exe" -Force
-            }
-        }
-        catch {
-            return "Error"
-        }
-        finally {
-            if (Test-Path $tempZip)     { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
-            if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
-        }
-    }
-
-    $existingLogs = Get-ChildItem -Path $targetDir -Filter "*.log" -ErrorAction SilentlyContinue
-    if ($existingLogs) {
-        Remove-Item -Path "$targetDir\*.log" -Force -ErrorAction SilentlyContinue
-    }
-
-    try {
-        $processParams = @{
-            FilePath         = $targetExe
-            ArgumentList     = "-n -c"
-            WorkingDirectory = $targetDir
-            WindowStyle      = 'Hidden'
-            PassThru         = $true
-            Wait             = $true
-        }
-
-        $process = Start-Process @processParams
-    }
-    catch {
-        return "Error"
-    }
-
-    if (Test-Path -Path $targetDir) {
-        $logFile = Get-ChildItem -Path $targetDir -Filter "*.log" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($logFile) {
-            $statusMatch = Get-Content -Path $logFile.FullName -ErrorAction SilentlyContinue | Select-String -Pattern "Status:"
-            if ($statusMatch) {
-                return $statusMatch.Line.Trim()
-            }
-        }
-    }
-
-    return "NA"
-}
-
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -3166,15 +2862,6 @@ function Show-PlatformStatus {
     } else {
         Log-Output "RESULT: Neither COD Steam/BNET detected"
     }
-}
-
-function Print-PCRTable {
-    Log-Output "`n--- PCR LOGS ---" 'Cyan'
-
-    Get-PCR | ForEach-Object {
-        Log-Output $_
-    }
-    Log-Output ""
 }
 
 function Log-Output ($Text, $Color = "White", $NoNewLine = $false, [bool]$ConsoleOnly = $false) {
@@ -3247,12 +2934,12 @@ function Set-GuiProgress {
     }
 }
 
-function Show-PCR_Message() {
+function Show-PCR_Message($Data) {
     $HasFailures = $false
     $FailedRegisters = [System.Collections.Generic.List[string]]::new()
     $MatchCount = 0
 
-    Get-PCR | ForEach-Object {
+    $Data.PCRTable | ForEach-Object {
 
         if ($_ -match 'PCR\[(?<num>\d+)\]') {
             $pcrNum = $Matches['num']
@@ -3278,7 +2965,7 @@ function Show-PCR_Message() {
     }elseif (-not $HasFailures) {
         Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers." 'Green'
     } else {
-        Log-Output "[FAIL] Cryptographic Mismatch Detected! Physical TPM registers do not match log history." 'Red'
+        Log-Output "[FAIL] Cryptographic Mismatch Detected! BIOS update may be required" 'Red'
         Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
         Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
         $global:HasPCRFailures = $true
@@ -3803,7 +3490,7 @@ $RevokedShims = @(
 )
 
 # =========================================================================
-# GUI FORM
+# GUI FORM FUNCTIONS
 # =========================================================================
 
 $guiScript = {
@@ -4002,6 +3689,330 @@ $guiScript = {
         }
     }
 
+    function Run-PowerShell {
+        param (
+            [string]$FunctionName,
+            [object[]]$FunctionArgs
+        )
+
+        $sync = [hashtable]::Synchronized(@{ ProcId = $null })
+
+        $runspace = [runspacefactory]::CreateRunspace()
+        $runspace.ApartmentState = 'STA'
+        $runspace.Open()
+        $psUI = [powershell]::Create()
+        $psUI.Runspace = $runspace
+
+        [void]$psUI.AddScript({
+            param($sync)
+            Add-Type -AssemblyName System.Windows.Forms
+
+            $form = New-Object System.Windows.Forms.Form
+            $form.Text = "Please Wait"
+            $form.Size = New-Object System.Drawing.Size(300, 100)
+            $form.StartPosition = 'CenterScreen'
+            $form.FormBorderStyle = 'FixedToolWindow'
+            $form.TopMost = $true
+
+            $label = New-Object System.Windows.Forms.Label
+            $label.Text = "Loading ..."
+            $label.AutoSize = $true
+            $label.Location = New-Object System.Drawing.Point(40, 20)
+            $form.Controls.Add($label)
+
+            $timer = New-Object System.Windows.Forms.Timer
+            $timer.Interval = 30
+            $timer.Add_Tick({
+                if ($sync.ProcId) {
+                    try {
+                        $proc = [System.Diagnostics.Process]::GetProcessById($sync.ProcId)
+                        if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+                            $timer.Stop()
+                            $form.Close()
+                        }
+                    } catch {
+                        $timer.Stop()
+                        $form.Close()
+                    }
+                }
+            })
+
+            $form.Add_Shown({ $timer.Start() })
+            $form.ShowDialog()
+        }).AddArgument($sync)
+
+        $asyncHandle = $psUI.BeginInvoke()
+
+        $envPrefix = "PSARGS_$([Guid]::NewGuid().ToString('N'))"
+        $chunkCount = 0
+
+        if ($null -ne $FunctionArgs -and $FunctionArgs.Count -gt 0) {
+            $serializedArgs = [System.Management.Automation.PSSerializer]::Serialize($FunctionArgs)
+            $chunkSize = 30000 # Keep safely under Windows' 32,767 char limit per variable
+            $chunkCount = [math]::Ceiling($serializedArgs.Length / $chunkSize)
+
+            for ($i = 0; $i -lt $chunkCount; $i++) {
+                $start = $i * $chunkSize
+                $len = [math]::Min($chunkSize, $serializedArgs.Length - $start)
+                [Environment]::SetEnvironmentVariable("${envPrefix}_$i", $serializedArgs.Substring($start, $len), 'Process')
+            }
+        }
+
+        $fnDef = (Get-Command $FunctionName).ScriptBlock.ToString()
+        $fullScript = @"
+        function $FunctionName { $fnDef }
+        try {
+            `$i = 0
+            `$serializedArgs = ''
+
+            while (`$true) {
+                `$chunk = [Environment]::GetEnvironmentVariable("${envPrefix}_`$i", 'Process')
+                if (`$null -eq `$chunk) { break }
+
+                `$serializedArgs += `$chunk
+                [Environment]::SetEnvironmentVariable("${envPrefix}_`$i", `$null, 'Process')
+                `$i++
+            }
+
+            if (![string]::IsNullOrWhiteSpace(`$serializedArgs)) {
+                `$argsList = [System.Management.Automation.PSSerializer]::Deserialize(`$serializedArgs)
+                $FunctionName @argsList
+            } else {
+                $FunctionName
+            }
+        } finally {
+            Write-Host "`nPress Enter to exit . . ." -NoNewline
+            `$null = Read-Host
+        }
+"@
+
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes($fullScript)
+        $encodedCommand = [Convert]::ToBase64String($bytes)
+
+        $proc = Start-Process powershell.exe -ArgumentList "-NoProfile", "-EncodedCommand", $encodedCommand -PassThru
+        $sync.ProcId = $proc.Id
+
+        for ($i = 0; $i -lt $chunkCount; $i++) {
+            [Environment]::SetEnvironmentVariable("${envPrefix}_$i", $null, 'Process')
+        }
+
+        [void]$psUI.EndInvoke($asyncHandle)
+        $runspace.Close()
+        $runspace.Dispose()
+    }
+
+    function ViewWindowsComponentRepairedIssues {
+        $logFiles = Get-ChildItem "$env:windir\Logs\CBS\CBS*.log", "$env:windir\Logs\DISM\dism*.log" -ErrorAction SilentlyContinue
+
+        if (-not $logFiles) {
+            Write-Host "No CBS or DISM log files were found." -ForegroundColor Yellow
+            return
+        }
+
+        Write-Host "`n--- Windows Component Repaired Issues ---`n" -ForegroundColor Cyan
+
+        $repairedIssues = $logFiles | ForEach-Object {
+            Write-Host "PROCESSING: $($_.FullName)" -ForegroundColor DarkGray
+
+            Get-Content $_.FullName -ReadCount 1000 | ForEach-Object {
+                $_ -match 'Repairing|Repaired|Corrupt|Has been repaired|Repair complete|Fixed|Successfully repaired|Restored'
+            }
+        } | Select-Object -Unique
+
+        if ($repairedIssues) {
+            Write-Host "`nFound Issues / Repairs:" -ForegroundColor Green
+            foreach ($issue in $repairedIssues) {
+                Write-Host $issue
+            }
+        } else {
+            Write-Host "`nNo repaired issues found in the log files." -ForegroundColor Yellow
+        }
+    }
+
+    function Print-DBX {
+        $script:dbxData = (Get-SecureBootUEFI -Name dbx -Decoded) | Select-Object `
+            @{N='Authority CN'; E={
+                if ($_.Authority) {
+                    $_.Authority -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+                } elseif ($_.Subject) {
+                    $_.Subject -match 'CN\s*=\s*([^,]+)' | Out-Null; $Matches[1]
+                } else {
+                    "N/A (Raw Hash)"
+                }
+            }},
+            @{N='Description'; E={
+                if ($_.Description) { $_.Description }
+                elseif ($_.Company) { $_.Company }
+                else { "N/A" }
+            }},
+            @{N='Hash'; E={
+                if ($_.Hash) { $_.Hash }
+                elseif ($_.Fingerprint) { $_.Fingerprint }
+                else { $_.SerialNumber }
+            }}
+
+        $formattedOutput = $script:dbxData | Format-Table -Property @{E='Authority CN'; Width=40}, @{E='Description'; Width=35}, Hash -Wrap | Out-String
+        Write-Host $formattedOutput
+    }
+
+    function Reset-ActivisionKey {
+        try {
+            $keys = certutil -csp "Microsoft Platform Crypto Provider" -key 2>&1
+            $index = -1
+
+            for ($i = 0; $i -lt $keys.Count; $i++) {
+                if ($keys[$i] -match 'ActivisionAIK') {
+                    $index = $i
+                    break
+                }
+            }
+
+            $keyFound = $false
+
+            if ($index -ge 0 -and $index -lt ($keys.Count - 1)) {
+                $filePath = $keys[$index + 1].Trim()
+
+                if (Test-Path $filePath) {
+                    $destinationPath = "$filePath.bak"
+
+                    if (Test-Path $destinationPath) {
+                        Remove-Item -Path $destinationPath -Force
+                    }
+
+                    $newName = "$(Split-Path -Path $filePath -Leaf).bak"
+                    Rename-Item -Path $filePath -NewName $newName -Force
+                    Write-Host "Successfully renamed key file to: $destinationPath" -ForegroundColor Green
+                    $keyFound = $true
+                }
+            } else {
+                Write-Host "ActivisionAIK key not found." -ForegroundColor Yellow
+            }
+
+    #       Appears to not be required as COD creates key.
+    #       $response = Read-Host -Prompt "Would you like to generate a new key? (Y/N)"
+    #       if ($response -match '^(Y|Yes)$') {
+    #           Write-Host "Generating a new ActivisionAIK key..." -ForegroundColor Green
+    #           & certreq.exe -enrollaik -f -q -machine -config "" "ActivisionAIK"
+    #       } else {
+    #           Write-Host "No key requested. Exiting script." -ForegroundColor Yellow
+    #       }
+
+        } catch {
+            Write-Host "Error" -ForegroundColor Red
+        }
+    }
+
+    function Print-IntermediateCerts($certText) {
+        Write-Host "=== Intermediate Certificate Details ===" -ForegroundColor Cyan
+        $text = ($certText -join "`n").Trim()
+        Write-Host $(if ($text) { $text } else { "No Intermediate Certificates found." })
+    }
+
+    function RepairWindowsFiles {
+        Write-Host "Checking Windows Files.. This will take a while." -ForegroundColor Cyan
+        DISM /Online /Cleanup-Image /RestoreHealth
+        sfc /scannow
+    }
+
+    function Reset-WindowsCache {
+        $backupFolder = Join-Path $env:ProgramData "TPM-INFO-TOOL"
+        if (-not (Test-Path $backupFolder)) {
+            New-Item -Path $backupFolder -ItemType Directory -Force | Out-Null
+        }
+
+        $Path1 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning"
+        $Path2 = "HKLM:\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement"
+
+        reg export "HKLM\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Provisioning" "$backupFolder\Provisioning.reg" /y
+        reg export "HKLM\SYSTEM\CurrentControlSet\Services\Tpm\WMI\Endorsement" "$backupFolder\Endorsement.reg" /y
+
+        if (Test-Path $Path1) {
+            Remove-Item -Path $Path1 -Recurse -Force
+        }
+        if (Test-Path $Path2) {
+            Remove-Item -Path $Path2 -Recurse -Force
+        }
+
+        certutil -urlcache * delete
+        Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$env:WinDir\System32\config\systemprofile\AppData\LocalLow\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
+
+$postRebootScript = @"
+            Initialize-Tpm
+            Enable-TpmAutoProvisioning
+
+            for (`$i = 5; `$i -gt 0; `$i--) {
+                Write-Host "`nWaiting for Auto Provisioning... `$i second(s) remaining" -NoNewline -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+
+            Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
+
+            for (`$i = 10; `$i -gt 0; `$i--) {
+                Write-Host "`nWaiting for TPM maintenance... `$i second(s) remaining" -NoNewline -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+
+            certreq -q -enrollaik -f -config '""'
+
+            Write-Host "`nTPM Provisioning Complete. Re-run TPM-INFO-TOOL." -ForegroundColor Green
+            Pause
+            exit
+"@
+
+        $postScriptPath = Join-Path $backupFolder "PostReboot.ps1"
+        Set-Content -Path $postScriptPath -Value $postRebootScript -Force
+
+        $runOnceKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+        $cmd = "powershell.exe -ExecutionPolicy Bypass -NoExit -File `"$postScriptPath`""
+        Set-ItemProperty -Path $runOnceKey -Name "TPMPostReboot" -Value $cmd -Force
+
+        Disable-TpmAutoProvisioning -OnlyForNextRestart
+
+        Write-Host "Initial phase complete. Computer will restart in 5 seconds to finish initialization..." -ForegroundColor Cyan
+        Start-Sleep -Seconds 5
+        Restart-Computer -Force
+    }
+
+    function Print-PCRTable($PCRTable) {
+        Write-Host "`n--- PCR LOGS ---" -ForegroundColor Cyan
+
+        foreach ($line in $PCRTable) {
+            Write-Host $line.Trim()
+        }
+    }
+
+    function Get-LoadingStatus {
+        param (
+            $Data
+        )
+
+        if ($Data -eq $null) {
+            Show-MessageBox -Title "Loading Status" -Description "Please wait until program has finished loading."
+            return $false
+        }
+        return $true
+    }
+
+    function Show-MessageBox {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string]$Title,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Description
+        )
+
+        [void][System.Windows.Forms.MessageBox]::Show($Description, $Title)
+    }
+
+
+# =========================================================================
+# GUI FORM
+# =========================================================================
+
     $bgColor        = [System.Drawing.ColorTranslator]::FromHtml("#F1F5F9")
     $cardBgColor    = [System.Drawing.Color]::White
     $textDark       = [System.Drawing.ColorTranslator]::FromHtml("#0F172A")
@@ -4011,7 +4022,7 @@ $guiScript = {
 
     $form = New-Object System.Windows.Forms.Form -Property @{
         Text            = "TPM-INFO-Tool"
-        Size            = New-Object System.Drawing.Size(1000, 880)
+        Size            = New-Object System.Drawing.Size(1000, 910)
         StartPosition   = "CenterScreen"
         FormBorderStyle = "Sizable"
         MaximizeBox     = $true
@@ -4019,6 +4030,107 @@ $guiScript = {
         BackColor       = $bgColor
     }
 
+    # ==========================================
+    # MENU BAR CREATION
+    # ==========================================
+    $menuStrip = New-Object System.Windows.Forms.MenuStrip
+
+    # --- Advanced Menu ---
+    $menuAdvanced = New-Object System.Windows.Forms.ToolStripMenuItem("Advanced")
+
+    $itemResetTpm = $menuAdvanced.DropDownItems.Add("Attempt TPM 'State Mismatch' Repair")
+    $itemResetTpm.Add_Click({
+        if (Get-LoadingStatus($syncHash.Data)) {
+            if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.CpuInfo.Socket -eq "AM4") {
+                Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
+            } elseif (-not $syncHash.Data.BiosInfo.Passed -or $Data.BitLocker.Passed -eq $true) {
+                Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
+            } elseif ($syncHash.Data.PostRebootScript) {
+                Show-MessageBox -Title "Status" -Description "Fix already attempted."
+            } else {
+                $promptMessage = "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and IME. This will reboot your PC!`n`nDo you want to continue?"
+
+                $runScript = [System.Windows.Forms.MessageBox]::Show(
+                    $promptMessage,
+                    'Warning',
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+
+                if ($runScript -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    Run-PowerShell -FunctionName "Reset-WindowsCache"
+                }
+            }
+        }
+    })
+
+    $itemRepairSfc = $menuAdvanced.DropDownItems.Add("Repair Corrupted Windows Components")
+    $itemRepairSfc.Add_Click({
+        Run-PowerShell -FunctionName "RepairWindowsFiles"
+    })
+
+    # --- Dev Menu ---
+    $menuDev = New-Object System.Windows.Forms.ToolStripMenuItem("Dev")
+
+    $help = $null
+    if (-not $syncHash.devMode) {
+        $help = $menuDev.DropDownItems.Add("Run with -dev to enable")
+    }
+
+    $itemDeleteActivision = $menuDev.DropDownItems.Add("Delete Activision Key")
+    $itemDeleteActivision.Add_Click({
+        Run-PowerShell -FunctionName "Reset-ActivisionKey"
+    })
+
+    $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+    $itemPrintPCR = $menuDev.DropDownItems.Add("Print PCR Table")
+    $itemPrintPCR.Add_Click({
+        if (Get-LoadingStatus $syncHash.Data) {
+            Run-PowerShell -FunctionName "Print-PCRTable" -FunctionArgs (, $syncHash.Data.PCRTable)
+        }
+    })
+
+    $itemPrintDBX = $menuDev.DropDownItems.Add("Print DBX Table")
+    $itemPrintDBX.Add_Click({
+        Run-PowerShell -FunctionName "Print-DBX"
+    })
+
+    $itemCertDetails = $menuDev.DropDownItems.Add("View Intermediate Cert Details")
+    $itemCertDetails.Add_Click({
+        $certsText = ($syncHash.Data.IntermediateCerts | Out-String).Trim()
+        Run-PowerShell -FunctionName "Print-IntermediateCerts" -FunctionArgs (, $certsText)
+    })
+
+    $itemViewRepaired = $menuDev.DropDownItems.Add("View Windows Component Repaired Issues")
+    $itemViewRepaired.Add_Click({
+        Run-PowerShell -FunctionName "ViewWindowsComponentRepairedIssues"
+
+    })
+
+    if (-not $syncHash.devMode) {
+        $menuDev.ForeColor = [System.Drawing.Color]::Gray
+        foreach ($item in $menuDev.DropDownItems) {
+            $item.Enabled = $false
+        }
+        $help.ForeColor = [System.Drawing.Color]::Red
+        $help.Enabled   = $true
+    }
+
+    $itemRunTpmMsc = $menuDev.DropDownItems.Add("tpm.msc")
+    $itemRunTpmMsc.Add_Click({
+        Start-Process "tpm.msc"
+    })
+
+    [void]$menuStrip.Items.Add($menuAdvanced)
+    [void]$menuStrip.Items.Add($menuDev)
+    [void]$menuStrip.Items.Add($menuRun)
+
+    $form.MainMenuStrip = $menuStrip
+
+    # ==========================================
+    # EXISTING CONTROLS & LAYOUT
+    # ==========================================
     $pnlControls = New-Object System.Windows.Forms.Panel -Property @{
         Dock      = [System.Windows.Forms.DockStyle]::Top
         Height    = 250
@@ -4170,12 +4282,14 @@ $guiScript = {
     }
 
     $syncHash.ConsoleBox   = $consoleBox
-    $syncHash.ProgressBar = $progressBar
+    $syncHash.ProgressBar  = $progressBar
     $syncHash.StatusLabel  = $lblProgress
     $syncHash.PercentLabel = $lblPercent
 
+    # ADD CONTROLS TO FORM
     $form.Controls.Add($consoleBox)
     $form.Controls.Add($pnlControls)
+    $form.Controls.Add($menuStrip)
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 33
@@ -4611,9 +4725,7 @@ function Show-UIOutput ($Data) {
         Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
     }
 
-    if ($Data.dismFullHealth -eq "NA" ){
-        Log-Output "[INFO] Dism NA" 'white'
-    }elseif ($Data.dismFullHealth){
+    if ($Data.dismHealth){
         Log-Output "[PASS] Dism" 'Green'
     }else{
         Log-Output "[WARN] Dism" 'Yellow'
@@ -4667,10 +4779,16 @@ function Show-UIOutput ($Data) {
     Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
     if($Data.AutoProvision) {
-        Log-Output "[INFO] Reg DisableAutoProvision" 'DarkYellow'
+        Log-Output "INFO: Reg DisableAutoProvision" 'DarkYellow'
     }
     if($Data.StrictValidation) {
-        Log-Output "[INFO] Reg DisableStrictValidation" 'DarkYellow'
+        Log-Output "INFO: Reg DisableStrictValidation" 'DarkYellow'
+    }
+
+    if($Data.PostRebootScript) {
+        Log-Output "INFO: PostReboot"
+    }else{
+        Log-Output "INFO: No PostReboot"
     }
 
     $consoleOption = $true
@@ -4785,8 +4903,6 @@ function Show-UIOutput ($Data) {
     }
     Log-Output ""
 
-    #Print-PCRTable
-
     Show-TcgAttestationAudit -Data $Data
 
     Log-Output "`n---- TRUST ---" 'Cyan'
@@ -4847,10 +4963,6 @@ function Invoke-MainExecution {
     $ShouldExit = { return ($null -ne $syncHash -and $syncHash.IsClosing) }
 
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $job = $true
-    if (!$global:isTest){
-        $job = Test-DismHealthAsync
-    }
 
     $global:platforms = Get-PlatformInstallStatus
 
@@ -4942,6 +5054,9 @@ function Invoke-MainExecution {
         FaceitService          = & $ExecStep { Test-FaceitService }
         AutoProvision          = & $ExecStep { Test-TpmNoAutoProvisionExists }
         StrictValidation       = & $ExecStep { Test-TpmDisableStrictValidationExists }
+        PCRTable               = & $ExecStep { Get-PCR }
+        PostRebootScript       = & $ExecStep { Test-PostRebootScript }
+        dismHealth             = & $ExecStep { Test-DismHealth }
     }
 
     if (&$ShouldExit) { return $null }
@@ -4959,96 +5074,57 @@ function Invoke-MainExecution {
     $systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
     $systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
 
-    if (&$ShouldExit) { return $null }
-
-    Write-GuiHost "Checking Windows DISM.. May take a minute." -ForegroundColor White
-    if (!$global:isTest) {
-        $timeoutSeconds = 110
-        $dismDeadlineSeconds = $timer.Elapsed.TotalSeconds + $timeoutSeconds
-
-        while ($job.State -eq 'Running' -and $timer.Elapsed.TotalSeconds -lt $dismDeadlineSeconds) {
-            # Immediate break if user closes window mid-loop
-            if (&$ShouldExit) {
-                Stop-Job -Job $job -ErrorAction SilentlyContinue
-                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-                return $null
-            }
-
-            $lastProgress = $job.ChildJobs[0].Progress | Select-Object -Last 1
-            $secondsRemaining = [math]::Max(0, [int]($dismDeadlineSeconds - $timer.Elapsed.TotalSeconds))
-
-            $statusText = if ($lastProgress.StatusDescription) {
-                $lastProgress.StatusDescription
-            } else {
-                "Running health check..."
-            }
-
-            Set-GuiProgress -Activity "Checking Windows DISM" `
-                           -Status "$statusText (Timeout in ${secondsRemaining}s)" `
-                           -CurrentOperation "Total execution time: $([int]$timer.Elapsed.TotalSeconds)s" `
-                           -PercentComplete ($lastProgress.PercentComplete)
-
-            Start-Sleep -Milliseconds 500
-        }
-
-        Set-GuiProgress -Activity "Checking Windows DISM" -Completed
-
-        if ($job.State -eq 'Running') {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            $job = "NA"
-        }
-    }
-
     $timer.Stop()
-    $systemData | Add-Member -NotePropertyName "dismFullHealth" -NotePropertyValue $job
 
     if (&$ShouldExit) { return $null }
 
     Set-GuiProgress -Status "Progress" -Percent 100 -Activity "TPM Attestation Status"
-    $syncHash.AttestationPass = $systemData.OverallPassResult
-    $syncHash.IsCompleted     = $true
-    $syncHash.CurrentPercent  = 100
+    $syncHash.AttestationPass   = $systemData.OverallPassResult
+    $syncHash.IsCompleted       = $true
+    $syncHash.CurrentPercent    = 100
+    $syncHash.Data = $systemData;
 
     Show-UIOutput -Data $systemData
     return $systemData
 }
 
-if ($TestFile -eq "-fix") {
-    Show-FixMenu
-}else{
-    $rs = [runspacefactory]::CreateRunspace()
-    $rs.ApartmentState = 'STA'
-    $rs.Open()
+if ($env:IS_UNINSTALL_MODE -eq "1") {
+    $targetPath = Join-Path $env:ProgramData "TPM-INFO-TOOL"
+    Remove-Item -Path $targetPath -Recurse -Force
+    exit
+}
 
-    $ps = [powershell]::Create()
-    $ps.Runspace = $rs
-    $null = $ps.AddScript($guiScript).AddArgument($syncHash)
+$rs = [runspacefactory]::CreateRunspace()
+$rs.ApartmentState = 'STA'
+$rs.Open()
 
-    # Launch GUI asynchronously
-    $asyncGuiResult = $ps.BeginInvoke()
+$ps = [powershell]::Create()
+$ps.Runspace = $rs
+$null = $ps.AddScript($guiScript).AddArgument($syncHash)
 
-    while (-not $syncHash.IsGuiReady) {
-        Start-Sleep -Milliseconds 100
-    }
-    Show-UpdateMessage
+# Launch GUI asynchronously
+ $asyncGuiResult = $ps.BeginInvoke()
 
-    $Data = Invoke-MainExecution
-    if ($null -eq $Data) { return $null }
+while (-not $syncHash.IsGuiReady) {
+    Start-Sleep -Milliseconds 100
+}
+Show-UpdateMessage
 
-    Show-UserRecommendedSteps -Data $Data
-    Check-CodBrokerService -Data $Data
+$Data = Invoke-MainExecution
+if ($null -eq $Data) { return $null }
 
-    while (-not $asyncGuiResult.IsCompleted) {
-        Start-Sleep -Milliseconds 200
-    }
+Show-UserRecommendedSteps -Data $Data
+Check-CodBrokerService -Data $Data
 
-    try {
-        $null = $ps.EndInvoke($asyncGuiResult)
-    } catch {}
-    finally {
-        $ps.Dispose()
-        $rs.Close()
-        $rs.Dispose()
-    }
+while (-not $asyncGuiResult.IsCompleted) {
+    Start-Sleep -Milliseconds 200
+}
+
+try {
+    $null = $ps.EndInvoke($asyncGuiResult)
+} catch {}
+finally {
+    $ps.Dispose()
+    $rs.Close()
+    $rs.Dispose()
 }
