@@ -215,7 +215,7 @@ function Get-CpuCompliance {
         return [PSCustomObject]@{
             Name        = $cpu.Name
             Gen         = $genValue
-            OldAMD      = $isPassed
+            OldAMD      = $oldAMD
             FakeOldAMD  = $fakeOldAMD
             Socket      = $cpu.SocketDesignation
             IsAMD       = $isAmd
