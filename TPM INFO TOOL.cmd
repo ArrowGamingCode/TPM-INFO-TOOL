@@ -4016,6 +4016,10 @@ $postRebootScript = @"
         [void][System.Windows.Forms.MessageBox]::Show($Description, $Title)
     }
 
+    function Install-TPMDiagnostic {
+        Write-Host "TPM Diagnostic is VERY slow to install. Come back in 30 minutes!" -ForegroundColor Yellow
+        DISM /Online /Add-Capability /CapabilityName:Tpm.TpmDiagnostics~~~~0.0.1.0
+    }
 
 # =========================================================================
 # GUI FORM
@@ -4116,6 +4120,18 @@ $postRebootScript = @"
 
     })
 
+    $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+    $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
+    $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+
+    if ($isWin11 -and -not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0) {
+        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
+        $itemInstallTPMDiag.Add_Click({
+            Run-PowerShell -FunctionName "Install-TPMDiagnostic"
+        })
+    }
+
     if (-not $syncHash.devMode) {
         $menuDev.ForeColor = [System.Drawing.Color]::Gray
         foreach ($item in $menuDev.DropDownItems) {
@@ -4125,6 +4141,7 @@ $postRebootScript = @"
         $help.Enabled   = $true
     }
 
+    $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $itemRunTpmMsc = $menuDev.DropDownItems.Add("tpm.msc")
     $itemRunTpmMsc.Add_Click({
         Start-Process "tpm.msc"
