@@ -70,7 +70,6 @@ $global:ClipboardBuffer = ""
 
 $global:ProgressStep = 0
 $ScriptVersion = $env:TPM_TOOL_VERSION
-$global:HasPCRFailures = $false
 $global:isTest = ($TestFile -and (Test-Path $TestFile))
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -957,12 +956,40 @@ function Get-TpmToolTypeMessage {
     }
 }
 
-function Get-PCR1To7Mismatches ($Data) {
-    return $Data.PCRTable | ForEach-Object {
-        if ($_ -match 'PCR\[0?(?<num>[1-7])\]' -and $_ -match 'MISMATCH|Failed|Error') {
-            [int]$Matches['num']
+function Process-PcrData ($GetPCR) {
+    $HasFailures     = $false
+    $FailedRegisters = [System.Collections.Generic.List[string]]::new()
+    $PcrMismatches   = [System.Collections.Generic.List[int]]::new()
+    $MatchCount      = 0
+    $PcrZero         = $null
+
+    foreach ($line in $GetPCR) {
+        if ($line -match 'PCR\[(?<num>\d+)\]') {
+            [int]$pcrNum = $Matches['num']
+            $CleanedLine = $line.Trim(" |!`r`n")
+
+            if ($line -match 'MISMATCH|Failed|Error') {
+                $HasFailures = $true
+                $FailedRegisters.Add("PCR[$pcrNum]")
+                $PcrMismatches.Add($pcrNum)
+            }
+            elseif ($pcrNum -eq 0) {
+                $PcrZero = $CleanedLine;
+            }
+
+            if ($line -match 'MATCH' -and $line -notmatch 'MISMATCH') {
+                $MatchCount++
+            }
         }
-    } | Select-Object -Unique
+    }
+
+    [PSCustomObject]@{
+        HasFailures     = $HasFailures
+        FailedRegisters = $FailedRegisters.ToArray()
+        MatchCount      = $MatchCount
+        PcrMismatches   = $PcrMismatches | Select-Object -Unique
+        PcrZero         = $PcrZero
+    }
 }
 
 function Get-PCR {
@@ -1874,7 +1901,19 @@ function Test-SecurityCompliance {
 
 function Show-TcgAttestationAudit ($Data) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
-    Show-PCR_Message $Data
+    Log-Output $Data.PcrData.PcrZero
+
+    if ($Data.PcrData.MatchCount -eq 0) {
+        Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
+    }
+    elseif (-not $Data.PcrData.HasFailures) {
+        Log-Output "[PASS] Hardware log verification matches live $($Data.PcrData.MatchCount) PCR registers." 'Green'
+    }
+    else {
+        Log-Output "[FAIL] Cryptographic Mismatch Detected! BIOS update may be required" 'Red'
+        Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
+        Log-Output "        Affected Registers: $($Data.PcrData.FailedRegisters -join ', ')" 'DarkRed'
+    }
 
     if($Data.MeasuredBootCompliance.pass){
         Log-Output $Data.MeasuredBootCompliance.message 'Green'
@@ -2942,44 +2981,6 @@ function Set-GuiProgress {
     }
 }
 
-function Show-PCR_Message($Data) {
-    $HasFailures = $false
-    $FailedRegisters = [System.Collections.Generic.List[string]]::new()
-    $MatchCount = 0
-
-    $Data.PCRTable | ForEach-Object {
-
-        if ($_ -match 'PCR\[(?<num>\d+)\]') {
-            $pcrNum = $Matches['num']
-            $CleanedLine = $_.Trim(" |!`r`n")
-            if ($_ -match 'MISMATCH|Failed|Error') {
-                $HasFailures = $true
-                $FailedRegisters.Add("PCR[$pcrNum]")
-                Log-Output $CleanedLine 'Red'
-            }
-            elseif ($pcrNum -eq '00' -or $pcrNum -eq '0') {
-                Log-Output $CleanedLine 'White'
-            }
-
-            if ($_ -match 'MATCH' -and -not ($_ -match 'MISMATCH')) {
-                $MatchCount++
-            }
-        }
-    }
-
-    if($MatchCount -eq 0){
-        Log-Output "[FAIL] Hardware log verification has PCR 0 registers ?" 'Red'
-        $global:HasPCRFailures = $true
-    }elseif (-not $HasFailures) {
-        Log-Output "[PASS] Hardware log verification matches live $MatchCount PCR registers." 'Green'
-    } else {
-        Log-Output "[FAIL] Cryptographic Mismatch Detected! BIOS update may be required" 'Red'
-        Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
-        Log-Output "       Affected Registers: $($FailedRegisters -join ', ')" 'DarkRed'
-        $global:HasPCRFailures = $true
-    }
-}
-
 # =========================================================================
 # SHIMS
 # =========================================================================
@@ -3984,10 +3985,10 @@ $postRebootScript = @"
         Restart-Computer -Force
     }
 
-    function Print-PCRTable($PCRTable) {
+    function Print-GetPCR($GetPCR) {
         Write-Host "`n--- PCR LOGS ---" -ForegroundColor Cyan
 
-        foreach ($line in $PCRTable) {
+        foreach ($line in $GetPCR) {
             Write-Host $line.Trim()
         }
     }
@@ -4055,7 +4056,7 @@ $postRebootScript = @"
         if (Get-LoadingStatus($syncHash.Data)) {
             if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.CpuInfo.Socket -eq "AM4") {
                 Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
-            } elseif (-not $syncHash.Data.BiosInfo.Passed -or $Data.BitLocker.Passed -eq $true) {
+            } elseif (-not $syncHash.Data.BiosInfo.Passed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
                 Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
             } elseif ($syncHash.Data.PostRebootScript) {
                 Show-MessageBox -Title "Status" -Description "Fix already attempted."
@@ -4099,7 +4100,7 @@ $postRebootScript = @"
     $itemPrintPCR = $menuDev.DropDownItems.Add("Print PCR Table")
     $itemPrintPCR.Add_Click({
         if (Get-LoadingStatus $syncHash.Data) {
-            Run-PowerShell -FunctionName "Print-PCRTable" -FunctionArgs (, $syncHash.Data.PCRTable)
+            Run-PowerShell -FunctionName "Print-GetPCR" -FunctionArgs (, $syncHash.Data.GetPCR)
         }
     })
 
@@ -4504,14 +4505,14 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($global:HasPCRFailures -and $Data.TestMSI -and $BatteryInfo.Text -eq "Laptop") {
-        if ((Get-PCR1To7Mismatches -Data $Data) -contains 7) {
+    if ($Data.PcrData.HasFailures -and $Data.TestMSI -and $BatteryInfo.Text -eq "Laptop") {
+        if ($PcrData.PcrMismatches -contains 7) {
             Log-Output "PCR 7 - bootx64.efi - https://www.msi.com/faq/faq-11370" 'Yellow'
         }
         Has-Issue
     }
 
-    if($Data.UefiGrubShimEntry -and $global:HasPCRFailures){
+    if($Data.UefiGrubShimEntry -and $Data.PcrData.HasFailures){
         Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
         Has-Issue
     }
@@ -4522,7 +4523,7 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($global:HasPCRFailures) ) {
+    if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($Data.PcrData.HasFailures) ) {
         Log-Output "PCR MISMATCH'." 'Yellow'
         Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
         Log-Output "-> Change:Secure Boot Security Mode From: Standard To: Custom > Maximum Security"
@@ -5086,7 +5087,7 @@ function Invoke-MainExecution {
         FaceitService          = & $ExecStep { Test-FaceitService }
         AutoProvision          = & $ExecStep { Test-TpmNoAutoProvisionExists }
         StrictValidation       = & $ExecStep { Test-TpmDisableStrictValidationExists }
-        PCRTable               = & $ExecStep { Get-PCR }
+        GetPCR                 = & $ExecStep { Get-PCR }
         PostRebootScript       = & $ExecStep { Test-PostRebootScript }
         dismHealth             = & $ExecStep { Test-DismHealth }
     }
@@ -5105,6 +5106,7 @@ function Invoke-MainExecution {
     $systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
     $systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
     $systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
+    $systemData | Add-Member -NotePropertyName "PcrData" -NotePropertyValue (Process-PcrData $systemData.GetPCR)
 
     $timer.Stop()
 
