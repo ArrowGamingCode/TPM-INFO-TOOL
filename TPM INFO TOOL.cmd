@@ -62,7 +62,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 73
+$global:TotalSteps = 74
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -2888,6 +2888,10 @@ function ViewWindowsComponentRepairedIssues {
     }
 }
 
+function isTpmDiagnosticsInstalled {
+    return ((Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed")
+}
+
 # =========================================================================
 # PRINT PIPELINE
 # =========================================================================
@@ -4844,6 +4848,9 @@ function Show-UIOutput ($Data) {
         }
     }
 
+    if($Data.isTpmDiagnostics) {
+        Log-Output "`n--- TPM DIAGNOSTIC ---" 'Cyan'
+    }
 
     Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
 
@@ -5090,6 +5097,7 @@ function Invoke-MainExecution {
         GetPCR                 = & $ExecStep { Get-PCR }
         PostRebootScript       = & $ExecStep { Test-PostRebootScript }
         dismHealth             = & $ExecStep { Test-DismHealth }
+        isTpmDiagnostics       = & $ExecStep { isTpmDiagnosticsInstalled }
     }
 
     if (&$ShouldExit) { return $null }
