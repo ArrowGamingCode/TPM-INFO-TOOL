@@ -3954,8 +3954,9 @@ $postRebootScript = @"
 
             certreq -q -enrollaik -f -config '""'
 
-            Write-Host "`nTPM Provisioning Complete. Re-run TPM-INFO-TOOL." -ForegroundColor Green
-            Pause
+            Write-Host "`nTPM Provisioning Complete. Please test Call of Duty!" -ForegroundColor Green
+            Write-Host "Press any key to exit..."
+            timeout /t 10 | Out-Null
             exit
 "@
 
@@ -4059,6 +4060,7 @@ $postRebootScript = @"
                 )
 
                 if ($runScript -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = "Running Reset-WindowsCache" })
                     Run-PowerShell -FunctionName "Reset-WindowsCache"
                 }
             }
