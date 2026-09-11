@@ -479,12 +479,20 @@ function Get-TpmStatus {
      try {
         $tpmObj = Get-CimInstance -Namespace 'Root\Cimv2\Security\MicrosoftTpm' -ClassName Win32_Tpm
         if ($tpmObj -and $tpmObj.SpecVersion -like '2.0*') {
-            $cpu = Get-CimInstance -ClassName Win32_Processor
-            $version = $tpmObj.ManufacturerVersion
+            $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+            $version = ($tpmObj.ManufacturerVersion -replace "`0|`r|`n", '').Trim()
+
+            $tpmNative = Get-Tpm
+            $mfgName = if ($tpmNative.ManufacturerIdTxt) {
+                ($tpmNative.ManufacturerIdTxt -replace "`0|`r|`n", '').Trim()
+            } else {
+                ''
+            }
+
             $isAmdBug = ($cpu.Name -match 'AMD') -and ($version -match '^3\.\d+\.0')
 
             return [PSCustomObject]@{
-                Text           = "2.0 - (v$version)"
+                Text           = "2.0 - (v$version) - $mfgName"
                 Passed         = $true
                 AmdFixRequired = $isAmdBug
             }
