@@ -3936,29 +3936,38 @@ $guiScript = {
         Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
 
-$postRebootScript = @"
+$postRebootScript = @'
             Initialize-Tpm
             Enable-TpmAutoProvisioning
 
-            for (`$i = 5; `$i -gt 0; `$i--) {
-                Write-Host "`nWaiting for Auto Provisioning... `$i second(s) remaining" -NoNewline -ForegroundColor Yellow
+            for ($i = 5; $i -gt 0; $i--) {
+                Write-Host "`nWaiting for Auto Provisioning... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
                 Start-Sleep -Seconds 1
             }
 
             Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
 
-            for (`$i = 10; `$i -gt 0; `$i--) {
-                Write-Host "`nWaiting for TPM maintenance... `$i second(s) remaining" -NoNewline -ForegroundColor Yellow
+            for ($i = 10; $i -gt 0; $i--) {
+                Write-Host "`nWaiting for TPM maintenance... $i second(s) remaining" -NoNewline -ForegroundColor Yellow
                 Start-Sleep -Seconds 1
             }
 
-            certreq -q -enrollaik -f -config '""'
+            certreq.exe -q -enrollaik -f -config ""
 
             Write-Host "`nTPM Provisioning Complete. Please test Call of Duty!" -ForegroundColor Green
-            Write-Host "Press any key to exit..."
-            timeout /t 10 | Out-Null
+            Write-Host "Press any key to exit (auto-exiting in 10 seconds)..." -ForegroundColor Cyan
+
+            $timeout = 10
+            for ($i = $timeout; $i -gt 0; $i--) {
+                if ([Console]::KeyAvailable) {
+                    $null = [Console]::ReadKey($true)
+                    break
+                }
+                Start-Sleep -Seconds 1
+            }
+
             exit
-"@
+'@
 
         $postScriptPath = Join-Path $backupFolder "PostReboot.ps1"
         Set-Content -Path $postScriptPath -Value $postRebootScript -Force
