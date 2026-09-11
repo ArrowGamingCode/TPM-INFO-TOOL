@@ -504,7 +504,7 @@ function Get-TpmStatus {
     }
 }
 
-function Get-LocalAttestationStatus {
+function Test-TpmKeyAttestationSupport {
     try {
         $features = Get-TpmSupportedFeature -ErrorAction SilentlyContinue
         if ($features -match 'Key Attestation') {
@@ -4682,10 +4682,8 @@ function Show-UIOutput ($Data) {
 
     Log-Output "`n--- XTRAS ---" 'Cyan'
 
-    if ($Data.localAttest) {
-        Log-Output "Local Attestation: SUPPORTED" 'Green'
-    } else {
-        Log-Output "Local Attestation: FAILED / NOT SUPPORTED" 'Red'
+    if (-not $Data.TpmKeyAttestation) {
+        Log-Output "[FAIL] Key Attestation: Unavailable" 'Red'
     }
 
     if ($Data.CodBroker.StartType -eq 'Automatic') {
@@ -5059,7 +5057,7 @@ function Invoke-MainExecution {
         DaysSinceInstall       = & $ExecStep { [Math]::Round(((Get-Date) - (Get-CimInstance -ClassName Win32_OperatingSystem).InstallDate).TotalDays) }
         BitLocker              = & $ExecStep { Get-BitLockerStatus }
         ExtendedTpmProperties  = & $ExecStep { $parsedTpmObject }
-        LocalAttest            = & $ExecStep { Get-LocalAttestationStatus }
+        TpmKeyAttestation      = & $ExecStep { Test-TpmKeyAttestationSupport }
         ParsedTpmToolType      = & $ExecStep { $parsedTpmToolTypeObject }
         IntelBiosInfo          = & $ExecStep { Get-IntelBiosCompliance }
         MeasuredBootCompliance = & $ExecStep { Test-SecurityCompliance -DecodedLog (Invoke-TpmLogParser) }
