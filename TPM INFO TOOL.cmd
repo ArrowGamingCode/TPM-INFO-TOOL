@@ -92,7 +92,7 @@ $syncHash = [hashtable]::Synchronized(@{
     PCID            = ""
     Data            = $null
 
-    enableUploadFeature = $true
+    IsUploadEnabled = $true
 
     ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
     DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
@@ -174,13 +174,13 @@ function Get-CpuCompliance {
     try {
         $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
         $cpuName = $cpu.Name.Trim() -replace '\s+', ' '
-        $oldAMD = $false
-        $fakeOldAMD = $false
+        $isOlderAmd = $false
+        $isMisclassifiedOlderAmd = $false
         $isAmd = $cpu.Manufacturer -like '*AMD*' -or $cpuName -match 'AMD'
 
         $isRyzenAI   = $cpuName -match "Ryzen AI"
         $isCoreUltra = $cpuName -match "Ultra"
-        $genValue = $null
+        $genValue    = $null
 
         if ($cpuName -match "Intel") {
             if ($isCoreUltra) {
@@ -202,37 +202,37 @@ function Get-CpuCompliance {
             }
 
             if ($cpuName -match '\b([12]\d{3})[A-Z]*\b') {
-                $oldAMD = $true
+                $isOlderAmd = $true
             }
 
             $fake3rdGenRegex = '\b(3200G|3400G|3100U|3200U|3250U|3250C|3300U|3500U|3500C|3501U|3550H|3580U|3700U|3700C|3750H|3780U|3000G|300GE|3050U|3050e|3050C|3150U|3150G|3150GE)\b'
             if ($cpuName -match $fake3rdGenRegex) {
-                $oldAMD     = $true
-                $fakeOldAMD = $true
+                $isOlderAmd     = $true
+                $isMisclassifiedOlderAmd = $true
             }
         }
 
         return [PSCustomObject]@{
-            Name        = $cpu.Name
-            Gen         = $genValue
-            OldAMD      = $oldAMD
-            FakeOldAMD  = $fakeOldAMD
-            Socket      = $cpu.SocketDesignation
-            IsAMD       = $isAmd
-            IsCoreUltra = $isCoreUltra
-            IsRyzenAI   = $isRyzenAI
+            Name                     = $cpu.Name
+            Gen                      = $genValue
+            IsOlderAmd               = $isOlderAmd
+            IsMisclassifiedOlderAmd  = $isMisclassifiedOlderAmd
+            Socket                   = $cpu.SocketDesignation
+            IsAMD                    = $isAmd
+            IsCoreUltra              = $isCoreUltra
+            IsRyzenAI                = $isRyzenAI
         }
     }
     catch {
         return [PSCustomObject]@{
-            Name        = "Unknown"
-            Gen         = ""
-            FakeOldAMD  = $false
-            OldAMD      = $false
-            Socket      = "Unknown"
-            IsAMD       = $false
-            IsCoreUltra = $false
-            IsRyzenAI   = $false
+            Name                    = "Unknown"
+            Gen                     = ""
+            IsMisclassifiedOlderAmd = $false
+            IsOlderAmd              = $false
+            Socket                  = "Unknown"
+            IsAMD                   = $false
+            IsCoreUltra             = $false
+            IsRyzenAI               = $false
         }
     }
 }
@@ -445,7 +445,7 @@ function Get-MicrosoftCaStatus {
     }
 }
 
-function Get-DoesThirdPartySecurityExist {
+function Get-ThirdPartySecurityStatus {
     try {
         $avProducts = @(
             Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName "AntivirusProduct" -ErrorAction SilentlyContinue |
@@ -690,7 +690,7 @@ function Get-AtviServiceInfo {
     }
 }
 
-function Test-FaceitService {
+function Test-FaceitServiceInstalled {
     Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\FACEITService"
 }
 
@@ -1603,24 +1603,8 @@ function Get-PC-ID {
     }
 }
 
-function Convert-Rot13 {
-    param (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
-        [string]$InputString
-    )
-
-    process {
-        return [regex]::Replace($InputString, '[a-zA-Z]', {
-            param($m)
-            $c = [int]$m.Value[0]
-            $base = if ($c -ge 97) { 97 } else { 65 }
-            return [char]((($c - $base + 13) % 26) + $base)
-        })
-    }
-}
-
-function Get-URL { #Reduce Spam
-    return "https://" + (Convert-Rot13 "neebjtnzvat.qri") + "/INFO_TOOL/"
+function Get-URL {
+    return "https://" + "arrowgaming" + ".dev" + "/INFO_TOOL/"
 }
 
 $syncHash.PCID = Get-PC-ID;
@@ -2418,7 +2402,7 @@ function Is-NextGenTPM {
     }
 
     if ($Data.CpuInfo.IsRyzenAI) {
-        if (-not $data.HasEK) {
+        if (-not $data.HasEndorsementKey) {
             return $true
         }
     }
@@ -2426,7 +2410,7 @@ function Is-NextGenTPM {
     return $false
 }
 
-function HasEK {
+function HasEndorsementKey {
     try {
         $ek = Get-TpmEndorsementKeyInfo -ErrorAction Stop
         if ($ek.PublicKey) {
@@ -2888,7 +2872,7 @@ function ViewWindowsComponentRepairedIssues {
     }
 }
 
-function isTpmDiagnosticsInstalled {
+function TpmDiagnosticsStatusInstalled {
     return ((Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed")
 }
 
@@ -4289,7 +4273,7 @@ $postRebootScript = @"
         $form.Close()
     })
 
-    if ($syncHash.EnableUploadFeature) {
+    if ($syncHash.IsUploadEnabled) {
         $pnlActionButtons.Controls.Add($btnUpload)
     }
 
@@ -4397,10 +4381,10 @@ function Show-UserRecommendedSteps ($Data) {
         Log-Output ""
     }
 
-    if ($Data.CpuInfo.OldAMD) {
+    if ($Data.CpuInfo.IsOlderAmd) {
         Log-Output "[WARNING] Incompatible CPU detected" 'Yellow'
 
-        if ($Data.CpuInfo.FakeOldAMD) {
+        if ($Data.CpuInfo.IsMisclassifiedOlderAmd) {
             Log-Output "CPU is branded as 3rd gen, but is really a 2nd gen." 'Yellow'
         }
 
@@ -4456,7 +4440,7 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($Data.doesThirdPartySecurityExist.Passed -and $Data.OverallPassResult -eq 1) {
+    if ($Data.ThirdPartySecurityStatus.Passed -and $Data.OverallPassResult -eq 1) {
         Log-Output "[WARNING] A third-party Antivirus was detected!" 'Yellow'
         Log-Output "-> WHY: Aggressive third-party security software can block CoD." 'Yellow'
         Log-Output "-> WHEN: If you have problems."
@@ -4480,11 +4464,11 @@ function Show-UserRecommendedSteps ($Data) {
         Log-Output "[WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
         Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
 
-        if ($Data.TestMSI.IsMSI){
+        if ($Data.MsiTestStatus.IsMSI){
             Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
         }
 
-        if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.Mobo -match "Gigabyte"){
+        if ($Data.CpuInfo.Socket -eq "AM5" -and $Data.Motherboard -match "Gigabyte"){
             Log-Output "-> Gigabyte Aorus Elite: Find 'Pluton fTPM' and change to 'ASF fTPM'." 'Yellow'
         }
 
@@ -4509,7 +4493,7 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($Data.PcrData.HasFailures -and $Data.TestMSI -and $BatteryInfo.Text -eq "Laptop") {
+    if ($Data.PcrData.HasFailures -and $Data.MsiTestStatus -and $BatteryInfo.Text -eq "Laptop") {
         if ($PcrData.PcrMismatches -contains 7) {
             Log-Output "PCR 7 - bootx64.efi - https://www.msi.com/faq/faq-11370" 'Yellow'
         }
@@ -4534,7 +4518,7 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($Data.failureMessage -eq 'No valid TPM EK/Platform certificate provided in the TPM identity request message.' -and
+    if ($Data.FailureMessage -eq 'No valid TPM EK/Platform certificate provided in the TPM identity request message.' -and
         $Data.MotherboardSwap.WasSwapped -and
         $Data.IntelBiosInfo.IsIntel -and
         $Data.CodBroker.Passed
@@ -4646,7 +4630,7 @@ function Show-UIOutput ($Data) {
     Log-Output "CPU:          $($Data.CpuInfo.Name) $($Data.CpuInfo.Gen)"
     Log-Output "GPU ver:      Nvidia: $($Data.NvidiaDriver) AMD: $($Data.AmdDriver)"
     Log-Output "PC Model:     $($Data.PcModel)"
-    Log-Output "Motherboard:  $($Data.Mobo)"
+    Log-Output "Motherboard:  $($Data.Motherboard)"
     Log-Output "BIOS:         $($Data.BiosInfo.String)"
     if ($Data.AgesaVersion) {
         Log-Output "Agesa:        $($Data.AgesaVersion)"
@@ -4658,7 +4642,7 @@ function Show-UIOutput ($Data) {
     Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
-    if ($Data.CpuInfo.OldAMD) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
+    if ($Data.CpuInfo.IsOlderAmd) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
     if ($Data.TpmInfo.Passed)  { Log-Output 'RESULT: TPM 2.0 Version Pass' 'Green' } else { Log-Output "CRITICAL: $($Data.TpmInfo.Text)" 'Red' }
 
     if ($Data.TpmOwnership.Passed) {
@@ -4762,13 +4746,13 @@ function Show-UIOutput ($Data) {
         Log-Output "[FAIL] Disk: $($Data.PartitionStyle.Type)" 'Red'
     }
 
-    if ($Data.dismHealth){
+    if ($Data.DismHealthStatus){
         Log-Output "[PASS] Dism" 'Green'
     }else{
         Log-Output "[WARN] Dism" 'Yellow'
     }
 
-    Log-Output "Third-Party AV: $($Data.doesThirdPartySecurityExist.Passed) - $($Data.doesThirdPartySecurityExist.Name)"
+    Log-Output "Third-Party AV: $($Data.ThirdPartySecurityStatus.Passed) - $($Data.ThirdPartySecurityStatus.Name)"
     Log-Output "Battery: $($Data.BatteryInfo.Text)"
 
     Show-PlatformStatus
@@ -4812,7 +4796,7 @@ function Show-UIOutput ($Data) {
         Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
     }
 
-    Log-Output "INFO: EK: $($Data.HasEK)"
+    Log-Output "INFO: EK: $($Data.HasEndorsementKey)"
     Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
     if($Data.AutoProvision) {
@@ -4848,22 +4832,22 @@ function Show-UIOutput ($Data) {
         }
     }
 
-    if($Data.isTpmDiagnostics) {
+    if($Data.TpmDiagnosticsStatus) {
         Log-Output "`n--- TPM DIAGNOSTIC ---" 'Cyan'
     }
 
     Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
 
     Log-Output "PK" -Color "Cyan"
-    $Data.SbKeys.PlatformKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+    $Data.SecureBootKeyInfo.PlatformKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
         Log-Output $_
     }
     Log-Output "KEK" -Color "Cyan"
-    $Data.SbKeys.KeyExchangeKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
+    $Data.SecureBootKeyInfo.KeyExchangeKey | Select-Object -ExpandProperty CN | Where-Object { $_ } | ForEach-Object {
         Log-Output $_
     }
     Log-Output "DB" -Color "Cyan"
-    $Data.SbKeys.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
+    $Data.SecureBootKeyInfo.DbKey | Format-Table -AutoSize -HideTableHeaders | Out-String -Stream | Where-Object { $_ -match '\S' } | ForEach-Object {
         Log-Output $_
     }
     Log-Output "Efi Boot: $($Data.EfiBootSignature.Year)" 'White'
@@ -4873,7 +4857,7 @@ function Show-UIOutput ($Data) {
     }
 
     Log-Output "`n--- CERTREQ ---" 'Cyan'
-    $certOut = $Data.certRaw | Protect-AIKPrivacy
+    $certOut = $Data.CertRaw | Protect-AIKPrivacy
     Log-Output $certOut 'Green'
 
     Log-Output "--- Events ---" 'Cyan'
@@ -4892,11 +4876,11 @@ function Show-UIOutput ($Data) {
     }else{
         Log-Output "[FAIL] OverallAIKResult" 'Yellow'
     }
-    if ($data.failureMessage) {
+    if ($data.FailureMessage) {
         if ($data.OverallPassResult -eq 1) {
-            Log-Output $data.failureMessage 'Red'
+            Log-Output $data.FailureMessage 'Red'
         }else{
-            Log-Output $data.failureMessage 'Yellow'
+            Log-Output $data.FailureMessage 'Yellow'
         }
     }
 
@@ -4977,7 +4961,7 @@ function Show-UIOutput ($Data) {
         Log-Output "FAILED: TPM Attestation is not working on this pc.`n" 'Red'
         Write-GuiHost "Reminder - Ensure you are on the latest BIOS." -ForegroundColor Yellow
 
-        if ($Data.certRaw) {
+        if ($Data.CertRaw) {
             $certOut -split "`r?`n" | ForEach-Object {
                 if ($_ -match '^\s*\{\s*"Message"\s*:') {
                     try {
@@ -5038,11 +5022,11 @@ function Invoke-MainExecution {
         AmdDriver              = & $ExecStep { Get-AmdDriverVersion }
         ChipsetVersion         = & $ExecStep { Get-ChipsetDriverVersion }
         RamSlots               = & $ExecStep { Get-RamDetails }
-        Mobo                   = & $ExecStep { Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version } }
+        Motherboard            = & $ExecStep { Get-CimInstance -ClassName Win32_BaseBoard | ForEach-Object { '{0} {1} (Ver: {2})' -f $_.Manufacturer, $_.Product, $_.Version } }
         BiosInfo               = & $ExecStep { Get-BiosCompliance }
         SecureBoot             = & $ExecStep { Get-SecureBootStatus }
         SecureBootType         = & $ExecStep { Get-SecureBootSetupType }
-        SbKeys                 = & $ExecStep { Get-SecureBootKeysType }
+        SecureBootKeyInfo      = & $ExecStep { Get-SecureBootKeysType }
         MicrosoftCa            = & $ExecStep { Get-MicrosoftCaStatus }
         SocialMedia_UEFICA2023 = & $ExecStep { Test-SocialMedia_UEFICA2023 }
         CsmInfo                = & $ExecStep { Get-CsmStatus }
@@ -5065,7 +5049,7 @@ function Invoke-MainExecution {
         BitLocker              = & $ExecStep { Get-BitLockerStatus }
         ExtendedTpmProperties  = & $ExecStep { $parsedTpmObject }
         LocalAttest            = & $ExecStep { Get-LocalAttestationStatus }
-        parsedTpmToolType      = & $ExecStep { $parsedTpmToolTypeObject }
+        ParsedTpmToolType      = & $ExecStep { $parsedTpmToolTypeObject }
         IntelBiosInfo          = & $ExecStep { Get-IntelBiosCompliance }
         MeasuredBootCompliance = & $ExecStep { Test-SecurityCompliance -DecodedLog (Invoke-TpmLogParser) }
         CurrentOS              = & $ExecStep { (Get-CimInstance -ClassName Win32_OperatingSystem).Caption }
@@ -5073,16 +5057,16 @@ function Invoke-MainExecution {
         OSSubVersion           = & $ExecStep { Get-WindowsSubVersion }
         OSSupported            = & $ExecStep { Get-Win10SupportStatus }
         PcModel                = & $ExecStep { Get-PcModel }
-        doesThirdPartySecurityExist = & $ExecStep { Get-DoesThirdPartySecurityExist }
+        ThirdPartySecurityStatus = & $ExecStep { Get-ThirdPartySecurityStatus }
         CompatibilityFlags     = & $ExecStep { Test-CompatibilityFlag }
         CodBrokerLog           = & $ExecStep { Get-CallOfDutyLogStatus }
         CodBootstrapperStatus  = & $ExecStep { Get-CallOfDutyBootstrapperStatus }
         CodBrokerCycleStatus   = & $ExecStep { Invoke-CodBrokerCycle }
         UACLevel               = & $ExecStep { Get-UacStatus }
         Sha256                 = & $ExecStep { Test-TPMSha256Support }
-        TestMSI                = & $ExecStep { Test-MSI }
+        MsiTestStatus          = & $ExecStep { Test-MSI }
         AgesaVersion           = & $ExecStep { Get-AgesaVersion }
-        HasEK                  = & $ExecStep { HasEK }
+        HasEndorsementKey      = & $ExecStep { HasEndorsementKey }
         LatestUpdatesSummary   = & $ExecStep { Get-LatestUpdatesSummary }
         ScoreShims             = & $ExecStep { Get-DbxRevocationScore -Hashes $RevokedShims }
         ScoreRecentShims       = & $ExecStep { Get-DbxRevocationScore -Hashes $RevokedRecentShims -DisplayType Count }
@@ -5091,13 +5075,13 @@ function Invoke-MainExecution {
         IntermediateCerts      = & $ExecStep { Get-RegIntermediateCerts }
         IsWindowsBootFirst     = & $ExecStep { Test-IsWindowsBootFirst }
         UefiGrubShimEntry      = & $ExecStep { Test-UefiGrubShimEntry }
-        FaceitService          = & $ExecStep { Test-FaceitService }
+        FaceitService          = & $ExecStep { Test-FaceitServiceInstalled }
         AutoProvision          = & $ExecStep { Test-TpmNoAutoProvisionExists }
         StrictValidation       = & $ExecStep { Test-TpmDisableStrictValidationExists }
         GetPCR                 = & $ExecStep { Get-PCR }
         PostRebootScript       = & $ExecStep { Test-PostRebootScript }
-        dismHealth             = & $ExecStep { Test-DismHealth }
-        isTpmDiagnostics       = & $ExecStep { isTpmDiagnosticsInstalled }
+        DismHealthStatus       = & $ExecStep { Test-DismHealth }
+        TpmDiagnosticsStatus   = & $ExecStep { TpmDiagnosticsStatusInstalled }
     }
 
     if (&$ShouldExit) { return $null }
@@ -5106,12 +5090,12 @@ function Invoke-MainExecution {
     $Pluton             = (Test-CertutilPluton -CertutilText $CertreqAttestation.CertRaw) -or (Is-Pluton)
     $TpmEkChainInfo     = Get-TpmEkChainInfo -Privacy $true -Key $CertreqAttestation.KeyID
 
-    $systemData | Add-Member -NotePropertyName "certRaw" -NotePropertyValue $CertreqAttestation.CertRaw
+    $systemData | Add-Member -NotePropertyName "CertRaw" -NotePropertyValue $CertreqAttestation.CertRaw
     $systemData | Add-Member -NotePropertyName "OverallPassResult" -NotePropertyValue $CertreqAttestation.OverallPassResult
     $systemData | Add-Member -NotePropertyName "IsOverallAIKPass" -NotePropertyValue $CertreqAttestation.IsOverallAIKPass
     $systemData | Add-Member -NotePropertyName "EnrollSuccess" -NotePropertyValue $CertreqAttestation.EnrollSuccess
-    $systemData | Add-Member -NotePropertyName "nameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
-    $systemData | Add-Member -NotePropertyName "failureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
+    $systemData | Add-Member -NotePropertyName "NameResolutionFailure" -NotePropertyValue $CertreqAttestation.NameResolutionFailure
+    $systemData | Add-Member -NotePropertyName "FailureMessage" -NotePropertyValue $CertreqAttestation.FailureMessage
     $systemData | Add-Member -NotePropertyName "Pluton" -NotePropertyValue $Pluton
     $systemData | Add-Member -NotePropertyName "TPMChainInfo" -NotePropertyValue $TpmEkChainInfo
     $systemData | Add-Member -NotePropertyName "PcrData" -NotePropertyValue (Process-PcrData $systemData.GetPCR)
