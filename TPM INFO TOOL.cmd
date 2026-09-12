@@ -1420,18 +1420,49 @@ function Invoke-CodBrokerCycle {
     }
 }
 
-function Print-CodBrokerCycleStatus {
-    param (
+function Print-CodBrokerStatus {
+    [CmdletBinding()]
+    param(
         [Parameter(Mandatory = $true)]
-        [string]$CycleResult
+        [string]$CycleResult,
+
+        [Parameter(Mandatory = $true)]
+        [object]$CodBroker,
+
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [object]$BrokerExe
     )
 
-    $cleanResult = $CycleResult.Trim()
+    $overallResult = $true
+    $failureReasons = [System.Collections.Generic.List[string]]::new()
 
-    if ($cleanResult -eq "True") {
-        Log-Output "[PASS] COD Broker Service Cycled" 'Green'
+    if ($CycleResult -ne 'True') {
+        $overallResult = $false
+        $failureReasons.Add("Service cycling failed")
+    }
+
+    if (-not $CodBroker.Passed) {
+        $overallResult = $false
+        $failureReasons.Add("COD.Broker.Service is $($CodBroker.Text)")
+    }
+
+    if (-not $BrokerExe) {
+        $overallResult = $false
+        $failureReasons.Add("CODBrokerService.exe binary is missing")
+    }
+
+    if ($overallResult) {
+        Log-Output "[PASS] COD Broker [v$($BrokerExe.Version)] [$($BrokerExe.MD5ShortHex)]" 'Green'
     } else {
-        Log-Output "[FAIL] COD Broker Service Cycled: $cleanResult" 'Red'
+        Log-Output "[FAIL] COD Broker [v$($BrokerExe.Version)] [$($BrokerExe.MD5ShortHex)]" 'Red'
+        foreach ($reason in $failureReasons) {
+            Log-Output "  - $reason" 'Red'
+        }
+    }
+
+    if ($CodBroker.StartType -eq 'Automatic') {
+        Log-Output "  - Service start type is set to Automatic"  'Yellow'
     }
 }
 
@@ -4694,20 +4725,7 @@ function Show-UIOutput ($Data) {
         Log-Output "[FAIL] Key Attestation: Unavailable" 'Red'
     }
 
-    if ($Data.CodBroker.StartType -eq 'Automatic') {
-        Log-Output 'WARNING: COD.Broker.Service is set to Automatic' 'DarkYellow'
-    } elseif ($Data.CodBroker.Passed) {
-        Log-Output 'RESULT: COD Broker Service Pass' 'Green'
-    } else {
-        Log-Output "ERROR: COD.Broker.Service is $($Data.CodBroker.Text)" 'Red'
-    }
-    Print-CodBrokerCycleStatus -CycleResult $Data.CodBrokerCycleStatus
-
-    if ($Data.BrokerExe) {
-        Log-Output "RESULT: CODBrokerService.exe Binary Exists (v$($Data.BrokerExe.Version)) [$($Data.BrokerExe.MD5ShortHex)] (Pass)" 'Green'
-    } else {
-        Log-Output 'WARNING: CODBrokerService.exe Binary Missing (Fail)' 'Yellow'
-    }
+    Print-CodBrokerStatus -CycleResult $Data.CodBrokerCycleStatus -CodBroker $Data.CodBroker -BrokerExe $Data.BrokerExe
 
     if ($Data.Randgrid.AnyFailed) {
         Log-Output '[FAIL] Ricochet install issues' 'Red'
