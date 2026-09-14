@@ -2194,7 +2194,7 @@ function Get-TpmEkChainInfo {
 }
 
 function Test-PostRebootScript {
-    $path = "C:\ProgramData\TPM-INFO-TOOL\PostReboot.ps1"
+    $path = "$env:ProgramData\TPM-INFO-TOOL\PostReboot.ps1"
     return Test-Path -Path $path
 }
 
@@ -4098,19 +4098,30 @@ $postRebootScript = @'
             } elseif ($syncHash.Data.PostRebootScript) {
                 Show-MessageBox -Title "Status" -Description "Fix already attempted."
             } else {
-                $promptMessage = "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and IME. This will reboot your PC!`n`nDo you want to continue?"
-
                 $runScript = [System.Windows.Forms.MessageBox]::Show(
-                    $promptMessage,
+                    "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and IME. This will reboot your PC!`n`nDo you want to continue?",
                     'Warning',
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question
                 )
 
-                if ($runScript -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = "Running Reset-WindowsCache" })
-                    Run-PowerShell -FunctionName "Reset-WindowsCache"
+                if ($runScript -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return;
                 }
+
+                $runScript2 = [System.Windows.Forms.MessageBox]::Show(
+                    "Continuing will clear the TPM and you may need to re-login to the MS store or other Apps.`n`nDo you want to continue?",
+                    'Warning',
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+
+                if ($runScript2 -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return
+                }
+
+                $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = "Running Reset-WindowsCache" })
+                Run-PowerShell -FunctionName "Reset-WindowsCache"
             }
         }
     })
