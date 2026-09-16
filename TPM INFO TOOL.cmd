@@ -135,11 +135,13 @@ function Write-GuiHost {
 
         $targetBox = $syncHash.ConsoleBox
         if ($null -ne $targetBox -and -not $targetBox.IsDisposed) {
-            $targetBox.SelectionStart  = $targetBox.TextLength
+            $targetBox.SelectionStart = $targetBox.TextLength
             $targetBox.SelectionLength = 0
-            $targetBox.SelectionColor  = $color
+            $targetBox.SelectionColor = $color
             $targetBox.AppendText($text)
             $targetBox.ScrollToCaret()
+            $targetBox.Invalidate()
+            $targetBox.Update()
         }
     }
 
@@ -4273,6 +4275,20 @@ $postRebootScript = @'
         MinimizeBox     = $true
         BackColor       = $bgColor
     }
+
+    $form.Add_Activated({
+        if ($syncHash.ConsoleBox -and -not $syncHash.ConsoleBox.IsDisposed) {
+            $syncHash.ConsoleBox.Invalidate()
+            $syncHash.ConsoleBox.Refresh()
+        }
+    })
+
+    $form.Add_VisibleChanged({
+        if ($form.Visible -and $syncHash.ConsoleBox -and -not $syncHash.ConsoleBox.IsDisposed) {
+            $syncHash.ConsoleBox.Invalidate()
+            $syncHash.ConsoleBox.Refresh()
+        }
+    })
 
     # ==========================================
     # MENU BAR CREATION
