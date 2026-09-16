@@ -713,15 +713,21 @@ function Get-PlatformInstallStatus {
         $steamReg = Get-ItemProperty -Path $steamRegKey -Name "InstallPath" -ErrorAction SilentlyContinue
         if ($steamReg -and $steamReg.InstallPath) {
             $libraryPaths = [System.Collections.Generic.List[string]]::new()
-            $libraryPaths.Add($steamReg.InstallPath)
+
+            if (Test-Path $steamReg.InstallPath) {
+                $libraryPaths.Add($steamReg.InstallPath)
+            }
 
             $vdfPath = Join-Path $steamReg.InstallPath "config\libraryfolders.vdf"
             if (Test-Path $vdfPath) {
                 $vdfContent = Get-Content $vdfPath -ErrorAction SilentlyContinue
                 foreach ($line in $vdfContent) {
                     if ($line -match '"path"\s+"([^"]+)"') {
-                        $cleanPath = $Matches[1].Replace("\\", "\")
-                        if ($libraryPaths -notcontains $cleanPath) { $libraryPaths.Add($cleanPath) }
+                        $cleanPath = $Matches[1] -replace '\\\\', '\'
+
+                        if ((Test-Path $cleanPath) -and ($libraryPaths -notcontains $cleanPath)) {
+                            $libraryPaths.Add($cleanPath)
+                        }
                     }
                 }
             }
@@ -730,7 +736,7 @@ function Get-PlatformInstallStatus {
             :steamSearch foreach ($lib in $libraryPaths) {
                 foreach ($subDir in $steamSubDirs) {
                     $checkPath = Join-Path $lib $subDir
-                    if (Test-Path (Join-Path $checkPath "bootstrapper.exe")) {
+                    if ($checkPath -and (Test-Path (Join-Path $checkPath "bootstrapper.exe"))) {
                         $steamPath      = $checkPath
                         $steamInstalled = $true
                         break steamSearch
@@ -754,8 +760,7 @@ function Get-PlatformInstallStatus {
                 $exeFile = Get-ChildItem -Path $locPath -Filter "bootstrapper.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
 
                 if ($exeFile) {
-                    $foundPath = $exeFile.DirectoryName
-                    $bnetPath      = $foundPath
+                    $bnetPath      = $exeFile.DirectoryName
                     $bnetInstalled = $true
                     break
                 }
@@ -2911,8 +2916,25 @@ function ViewWindowsComponentRepairedIssues {
     }
 }
 
-function TpmDiagnosticsStatusInstalled {
-    return ((Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed")
+function Get-TpmDiagnosticsInfo {
+    [CmdletBinding()]
+    param()
+
+    $isInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+
+    if (-not $isInstalled) {
+        return [PSCustomObject]@{
+            IsInstalled = $false
+            ekchain     = ""
+            ekchainNV   = ""
+        }
+    }
+
+    return [PSCustomObject]@{
+        IsInstalled = $true
+        ekchain     = Get-TPMEkChainStatus -Target "ekchain"
+        ekchainNV   = Get-TPMEkChainStatus -Target "ekchainNV"
+    }
 }
 
 # =========================================================================
@@ -3006,6 +3028,178 @@ function Set-GuiProgress {
         $syncHash.CurrentPercent = 100
         $syncHash.IsCompleted = $true
     }
+}
+
+# =========================================================================
+# TPM DIAGNOSTICS HELPER
+# =========================================================================
+
+function Invoke-TPMDiagnostics {
+    param([string]$Arguments)
+
+    if (-not (Get-Command "TPMDiagnostics.exe" -ErrorAction SilentlyContinue)) {
+        throw "TPMDiagnostics.exe was not found in PATH."
+    }
+
+    $output = & TPMDiagnostics.exe $Arguments 2>&1
+    return ($output -join "`n")
+}
+
+function ConvertFrom-HexBitmask {
+    param(
+        [string]$HexStatus,
+        [hashtable]$FlagMap,
+        [string]$ZeroMessage
+    )
+
+    if ([string]::IsNullOrWhiteSpace($HexStatus)) { return $null }
+
+    $cleanHex = $HexStatus.Trim()
+    $val = [uint32]$cleanHex
+
+    if ($val -eq 0) {
+        return "$ZeroMessage $cleanHex"
+    }
+
+    $matchedFlags = foreach ($flagHex in $FlagMap.Keys) {
+        if (($val -band $flagHex) -eq $flagHex) {
+            $FlagMap[$flagHex]
+        }
+    }
+
+    if ($matchedFlags) {
+        return "$($matchedFlags -join ' | ') $cleanHex"
+    } else {
+        return "UNKNOWN_FLAG $cleanHex"
+    }
+}
+
+function Get-TpmNvIndexes {
+    [CmdletBinding()]
+    param([int]$MinSizeBytes = 0)
+
+    $standardEkIndexes = @('0x01c00002', '0x01c0000a', '0x01c00014', '0x01c00016')
+    $nvInfo = Invoke-TPMDiagnostics -Arguments "EnumNVIndexes"
+    $blocks = $nvInfo -split '(?m)(?=^NV Public:)'
+
+    foreach ($block in $blocks) {
+        if ($block -match 'NV Public:\s+(0x[0-9a-fA-F]+)' -and $block -match 'dataSize:\s+0x[0-9a-fA-F]+\s+\((\d+)\)') {
+            $indexHex  = $Matches[1]
+            $sizeBytes = [int]$Matches[2]
+
+            if ($sizeBytes -ge $MinSizeBytes) {
+                [PSCustomObject]@{
+                    Index      = $indexHex
+                    Size       = $sizeBytes
+                    IsStandard = $standardEkIndexes -contains $indexHex.ToLower()
+                }
+            }
+        }
+    }
+}
+
+function Get-Asn1CertificateFromBytes {
+    param([byte[]]$Bytes)
+
+    if (-not $Bytes -or $Bytes.Length -lt 20) { return $null }
+
+    for ($i = 0; $i -lt $Bytes.Length - 4; $i++) {
+        if ($Bytes[$i] -ne 0x30) { continue }
+
+        $lenByte = [int]$Bytes[$i + 1]
+        if (($lenByte -band 0x80) -eq 0) {
+            $headerLen  = 2
+            $contentLen = $lenByte
+        } else {
+            $numLenBytes = $lenByte -band 0x7F
+            if ($numLenBytes -lt 1 -or $numLenBytes -gt 4) { continue }
+            if (($i + 2 + $numLenBytes) -gt $Bytes.Length) { continue }
+
+            $contentLen = [long]0
+            for ($j = 0; $j -lt $numLenBytes; $j++) {
+                $contentLen = ($contentLen -shl 8) -bor [long]$Bytes[$i + 2 + $j]
+            }
+            $headerLen = 2 + $numLenBytes
+        }
+
+        $totalLen = $headerLen + $contentLen
+        if ($totalLen -lt 200 -or ($i + $totalLen) -gt $Bytes.Length) { continue }
+
+        try {
+            $raw = New-Object byte[] $totalLen
+            [Array]::Copy($Bytes, $i, $raw, 0, $totalLen)
+            return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($raw)
+        } catch {}
+    }
+
+    return $null
+}
+
+# =========================================================================
+# TPM DIAGNOSTICS MAIN
+# =========================================================================
+
+function Get-TPMEkChainStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [ValidateSet("ekchain", "ekchainNV")]
+        [string]$Target = "ekchain"
+    )
+
+    try {
+        $text = Invoke-TPMDiagnostics -Arguments $Target
+    } catch {
+        return $_
+    }
+
+    if ($text -match '0x80070490' -or $text -match 'Element not found') {
+        $errStatus = ""
+        return [PSCustomObject]@{
+            "Chain"         = "NV Memory"
+            "dwErrorStatus" = $errStatus
+            "dwInfoStatus"  = "No EK Cert in NV RAM"
+            "Color"         = if ($errStatus -eq '0x10008') { 'red' } else { '' }
+        }
+    }
+
+    $results = @()
+    $hasMismatch = $false
+
+    if ($text -match '(?m)Cert Chain\s+cChain:\s*(\d+)\s+Trust\s+dwErrorStatus:\s*(0x[0-9a-fA-F]+)(?:,\s*dwInfoStatus:\s*(0x[0-9a-fA-F]+))?') {
+        $errStatus = $Matches[2]
+        if ($errStatus -eq '0x10008') { $hasMismatch = $true }
+
+        $results += [PSCustomObject]@{
+            "Chain"         = "Summary Total: $($Matches[1])"
+            "dwErrorStatus" = $errStatus
+            "dwInfoStatus"  = if ($Matches[3]) { $Matches[3] } else { "0x0" }
+            "Color"         = if ($errStatus -eq '0x10008') { 'red' } else { '' }
+        }
+    }
+
+    $chainMatches = [regex]::Matches($text, '(?m)^\s*Chain\s+(\d+):[\s\S]*?Trust\s+dwErrorStatus:\s*(0x[0-9a-fA-F]+)(?:,\s*dwInfoStatus:\s*(0x[0-9a-fA-F]+))?')
+    foreach ($match in $chainMatches) {
+        $errHex  = $match.Groups[2].Value
+        $infoHex = if ($match.Groups[3].Success) { $match.Groups[3].Value } else { "0x0" }
+
+        if ($errHex -eq '0x10008') { $hasMismatch = $true }
+
+        $results += [PSCustomObject]@{
+            "Chain"         = "Chain $($match.Groups[1].Value)"
+            "dwErrorStatus" = $errHex
+            "dwInfoStatus"  = $infoHex
+            "Color"         = if ($errHex -eq '0x10008') { 'red' } else { '' }
+        }
+    }
+
+    if ($hasMismatch) {
+        $results += [PSCustomObject]@{
+            "Mismatch" = $true
+        }
+    }
+
+    return $results
 }
 
 # =========================================================================
@@ -4170,18 +4364,6 @@ $postRebootScript = @'
 
     })
 
-    $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
-
-    $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
-    $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
-
-    if ($isWin11 -and -not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0) {
-        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
-        $itemInstallTPMDiag.Add_Click({
-            Run-PowerShell -FunctionName "Install-TPMDiagnostic"
-        })
-    }
-
     if (-not $syncHash.devMode) {
         $menuDev.ForeColor = [System.Drawing.Color]::Gray
         foreach ($item in $menuDev.DropDownItems) {
@@ -4189,6 +4371,19 @@ $postRebootScript = @'
         }
         $help.ForeColor = [System.Drawing.Color]::Red
         $help.Enabled   = $true
+    }
+
+    $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
+    $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+
+    if ($isWin11 -and (-not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0)) {
+        $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
+
+        $itemInstallTPMDiag.add_Click({
+            param($sender, $e)
+            Run-PowerShell -FunctionName "Install-TPMDiagnostic"
+        })
     }
 
     $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
@@ -4878,10 +5073,6 @@ function Show-UIOutput ($Data) {
         }
     }
 
-    if($Data.TpmDiagnosticsStatus) {
-        Log-Output "`n--- TPM DIAGNOSTIC ---" 'Cyan'
-    }
-
     Log-Output "`n--- SECURE BOOT KEYS ---" 'Cyan'
 
     Log-Output "PK" -Color "Cyan"
@@ -4991,6 +5182,19 @@ function Show-UIOutput ($Data) {
         }
 
         Log-Output "" 'White'
+    }
+
+    if($Data.TpmDiagnosticsInfo.isInstalled) {
+        Log-Output "`n--- TPM DIAGNOSTIC ---" 'Cyan'
+
+        Log-Output  ("{0,-16} | {1,-8} | {2}" -f "", "dwError", "dwInfo") 'White'
+        $Data.TpmDiagnosticsInfo.ekchain | ForEach-Object {
+            Log-Output ("{0,-16} | {1,-8} | {2}" -f $_.Chain, $_.dwErrorStatus, $_.dwInfoStatus) $_.Color
+        }
+        Write-GuiHost ""
+        $Data.TpmDiagnosticsInfo.ekchainNV | ForEach-Object {
+            Log-Output ("{0,-16} | {1,-8} | {2}" -f $_.Chain, $_.dwErrorStatus, $_.dwInfoStatus) $_.Color
+        }
     }
 
     Show-Banner -OverallPassResult $Data.OverallPassResult
@@ -5127,7 +5331,7 @@ function Invoke-MainExecution {
         GetPCR                 = & $ExecStep { Get-PCR }
         PostRebootScript       = & $ExecStep { Test-PostRebootScript }
         DismHealthStatus       = & $ExecStep { Test-DismHealth }
-        TpmDiagnosticsStatus   = & $ExecStep { TpmDiagnosticsStatusInstalled }
+        TpmDiagnosticsInfo     = & $ExecStep { Get-TpmDiagnosticsInfo }
     }
 
     if (&$ShouldExit) { return $null }
