@@ -3728,6 +3728,38 @@ $RevokedShims = @(
 $guiScript = {
     param($syncHash)
 
+    [System.Windows.Forms.Application]::SetUnhandledExceptionMode(
+        [System.Windows.Forms.UnhandledExceptionMode]::CatchException
+    )
+
+    $threadExceptionHandler = [System.Threading.ThreadExceptionEventHandler]{
+        param($sender, $e)
+
+        if ($e.Exception -is [System.Management.Automation.PipelineStoppedException]) {
+            $syncHash.IsClosing = $true
+
+            try {
+                if ($null -ne $timer -and -not $timer.IsDisposed) {
+                    $timer.Stop()
+                    $timer.Enabled = $false
+                }
+            } catch {}
+
+            return
+        }
+
+        if ($e.Exception -is [System.ObjectDisposedException] -and
+            $syncHash.IsClosing) {
+            return
+        }
+
+        [System.Windows.Forms.Application]::OnThreadException($e.Exception)
+    }
+
+    [System.Windows.Forms.Application]::add_ThreadException(
+        $threadExceptionHandler
+    )
+
     function Export-ReportToImage {
         param(
             [Parameter(Mandatory=$true)]
