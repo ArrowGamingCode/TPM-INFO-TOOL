@@ -294,15 +294,20 @@ function Get-BiosCompliance {
     $isPassed = $false
     $dateString = "Unknown"
 
+    [datetime]$ReasonableDatePass = '2024-01-01'
+    $isReasonablePassed = $false
+
     if ($biosObj -and $biosObj.ReleaseDate) {
         try {
             $biosDate = [datetime]$biosObj.ReleaseDate
             $dateString = $biosDate.ToString('yyyy-MM-dd')
             if ($biosDate -ge $MinBiosDate) { $isPassed = $true }
+            if ($biosDate -ge $ReasonableDatePass) { $isReasonablePassed = $true }
         } catch {
             if ([datetime]::TryParse($biosObj.ReleaseDate, [ref]$biosDate)) {
                 $dateString = $biosDate.ToString('yyyy-MM-dd')
                 if ($biosDate -ge $MinBiosDate) { $isPassed = $true }
+                if ($biosDate -ge $ReasonableDatePass) { $isReasonablePassed = $true }
             } else {
                  $dateString = "$($biosObj.ReleaseDate) (Unparsed)"
             }
@@ -312,6 +317,7 @@ function Get-BiosCompliance {
     return [PSCustomObject]@{
         String = '{0} (Released: {1})' -f $biosObj.SMBIOSBIOSVersion, $dateString
         Passed = $isPassed
+        ReasonablePassed = $isReasonablePassed
         Release = $dateString
     }
 }
@@ -4335,7 +4341,7 @@ $postRebootScript = @'
         if (Get-LoadingStatus($syncHash.Data)) {
             if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.CpuInfo.Socket -eq "AM4") {
                 Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
-            } elseif (-not $syncHash.Data.BiosInfo.Passed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
+            } elseif (-not $syncHash.Data.BiosInfo.ReasonablePassed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
                 Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
             } elseif ($syncHash.Data.PostRebootScript) {
                 Show-MessageBox -Title "Status" -Description "Fix already attempted."
