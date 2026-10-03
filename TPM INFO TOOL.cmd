@@ -2385,7 +2385,7 @@ function Get-CertreqAttestation($Data) {
             [System.Threading.Thread]::CurrentThread.CurrentUICulture = $oldCulture
         }
     }
-    Set-GuiProgress -Activity "Loading System Diagnostics" -Completed
+    Set-GuiProgress -Activity "Loading System Diagnostics"
 
     $successPatterns = "(?s)(?=.*SCEPDispositionSuccess)(?=.*EnrollStatus\(1\):\s*Enrolled)(?=.*New Certificate:)"
     $enrollSuccess = $certRaw -match $successPatterns
@@ -3727,6 +3727,7 @@ $RevokedShims = @(
     "2EA557C44B83C0AD6B71EFB7EDCC18B6337AD1C1D682155DD9451B051B62FF40"
 )
 
+
 # =========================================================================
 # GUI FORM FUNCTIONS
 # =========================================================================
@@ -4636,11 +4637,11 @@ $postRebootScript = @'
         if ($syncHash.IsCompleted -and $progressBar.Value -eq 100) {
             $timer.Stop()
 
-            if ($syncHash.AttestationPass -eq 1) {
+            if ($syncHash.Data.OverallPassResult -eq 1) {
                 $lblStatus.Text      = "PASSED"
                 $lblStatus.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#DCFCE7")
                 $lblStatus.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#166534")
-            } elseif ($syncHash.AttestationPass -eq 0) {
+            } elseif ($syncHash.Data.OverallPassResult -eq 0) {
                 $lblStatus.Text      = "FAILED"
                 $lblStatus.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#FEE2E2")
                 $lblStatus.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#991B1B")
@@ -5409,10 +5410,9 @@ function Invoke-MainExecution {
     if (&$ShouldExit) { return $null }
 
     Set-GuiProgress -Status "Progress" -Percent 100 -Activity "TPM Attestation Status"
-    $syncHash.AttestationPass   = $systemData.OverallPassResult
-    $syncHash.IsCompleted       = $true
-    $syncHash.CurrentPercent    = 100
     $syncHash.Data = $systemData;
+    $syncHash.CurrentPercent = 100
+    $syncHash.IsCompleted = $true
 
     Show-UIOutput -Data $systemData
     return $systemData
