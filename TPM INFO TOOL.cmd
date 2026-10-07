@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.19"
+set "TPM_TOOL_VERSION=1.0.20"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -62,7 +62,7 @@ for /f "usebackq tokens=* delims=" %%A in (`!command! 2^>nul`) do (
 endlocal & set "%~1=%result%"
 goto :eof
 #>
-$global:TotalSteps = 74
+$global:TotalSteps = 73
 
 $MinBiosDate = [datetime]'2025-08-01'
 $TestFile = $env:TPM_TEST_FILE
@@ -96,6 +96,7 @@ $syncHash = [hashtable]::Synchronized(@{
 
     ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
     DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
+    PipeName       = "$([Guid]::NewGuid().ToString('N'))"
 
     colorMap = @{
         "Cyan"       = [System.Drawing.Color]::Cyan
@@ -109,6 +110,7 @@ $syncHash = [hashtable]::Synchronized(@{
         "Gray"       = [System.Drawing.Color]::LightGray
     }
 })
+$syncHash.DataBuffer.Add("___DataBuffer Start___`n")
 
 # =========================================================================
 # FUNCTIONS
@@ -183,16 +185,32 @@ function Get-CpuCompliance {
         $isRyzenAI   = $cpuName -match "Ryzen AI"
         $isCoreUltra = $cpuName -match "Ultra"
         $genValue    = $null
+        $isIntel11GenOrLater = $false
 
         if ($cpuName -match "Intel") {
             if ($isCoreUltra) {
                 if ($cpuName -match "Ultra \d\s+(?:[A-Z]+\s+)?(\d)\d{2}") {
                     $genValue = "Gen: $($Matches[1])"
                 }
+
+                $isIntel11GenOrLater = $true
             } elseif ($cpuName -match "i\d-(\d+)") {
                 $modelNum = $Matches[1]
-                if ($modelNum.Length -eq 4) { $genValue = "Gen: $($modelNum.Substring(0, 1))" }
-                elseif ($modelNum.Length -eq 5) { $genValue = "Gen: $($modelNum.Substring(0, 2))" }
+
+                if ($modelNum.Length -eq 4) {
+                    $genValue = "Gen: $($modelNum.Substring(0, 1))"
+
+                    if ([int]$modelNum.Substring(0, 1) -ge 11) {
+                        $isIntel11GenOrLater = $true
+                    }
+                }
+                elseif ($modelNum.Length -eq 5) {
+                    $genValue = "Gen: $($modelNum.Substring(0, 2))"
+
+                    if ([int]$modelNum.Substring(0, 2) -ge 11) {
+                        $isIntel11GenOrLater = $true
+                    }
+                }
             }
         } elseif ($isAmd -and $cpuName -match "Ryzen") {
             if ($isRyzenAI) {
@@ -209,7 +227,7 @@ function Get-CpuCompliance {
 
             $fake3rdGenRegex = '\b(3200G|3400G|3100U|3200U|3250U|3250C|3300U|3500U|3500C|3501U|3550H|3580U|3700U|3700C|3750H|3780U|3000G|300GE|3050U|3050e|3050C|3150U|3150G|3150GE)\b'
             if ($cpuName -match $fake3rdGenRegex) {
-                $isOlderAmd     = $true
+                $isOlderAmd = $true
                 $isMisclassifiedOlderAmd = $true
             }
         }
@@ -223,6 +241,7 @@ function Get-CpuCompliance {
             IsAMD                    = $isAmd
             IsCoreUltra              = $isCoreUltra
             IsRyzenAI                = $isRyzenAI
+            IsIntel11GenOrLater      = $isIntel11GenOrLater
         }
     }
     catch {
@@ -235,6 +254,7 @@ function Get-CpuCompliance {
             IsAMD                   = $false
             IsCoreUltra             = $false
             IsRyzenAI               = $false
+            IsIntel11GenOrLater     = $false
         }
     }
 }
@@ -1065,126 +1085,6 @@ function Get-PCR {
        tpmtool parsetcglogs -validate |
          Where-Object { $_ -match '^\|\s*PCR' } |
          ForEach-Object { $_.Trim(" |!`r`n") }
-    }
-}
-
-$KeyName = "TPM_INFO_TOOL_KEY"
-$CngProvider = New-Object System.Security.Cryptography.CngProvider("Microsoft Platform Crypto Provider")
-
-function Remove-TpmKey {
-    param (
-        [string]$KeyName = $script:KeyName
-    )
-
-    if ([System.Security.Cryptography.CngKey]::Exists($KeyName, $script:CngProvider)) {
-        try {
-            $KeyToDelete = [System.Security.Cryptography.CngKey]::Open($KeyName, $script:CngProvider)
-            $KeyToDelete.Delete()
-        } catch {
-            Write-Host "[FAILURE] Could not delete the hardware key." -ForegroundColor Red
-            Write-Error $_.Exception.Message
-        }
-    }
-}
-
-function Protect-DataWithTpmKey {
-    param (
-        [string]$KeyName = $script:KeyName,
-        [string]$StringToSign = "TPM INFO TOOL"
-    )
-
-    if (-not [System.Security.Cryptography.CngKey]::Exists($KeyName, $script:CngProvider)) {
-        try {
-            $CngKeyCreationParameters = New-Object System.Security.Cryptography.CngKeyCreationParameters
-            $CngKeyCreationParameters.Provider = $script:CngProvider
-            $CngKeyCreationParameters.KeyCreationOptions = [System.Security.Cryptography.CngKeyCreationOptions]::None
-            $Algorithm = [System.Security.Cryptography.CngAlgorithm]::Rsa
-
-            $Null = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyName, $CngKeyCreationParameters)
-        } catch {
-            Write-Host "[FAILURE] Failed to provision the TPM key." -ForegroundColor Red
-            Write-Error $_.Exception.Message
-            return $null
-        }
-    }
-
-    try {
-        $TpmKey = [System.Security.Cryptography.CngKey]::Open($KeyName, $script:CngProvider)
-        $ChallengeBytes = [System.Text.Encoding]::UTF8.GetBytes($StringToSign)
-
-        $RsaSigner = New-Object System.Security.Cryptography.RSACng($TpmKey)
-        $Padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-        $HashAlgorithm = [System.Security.Cryptography.HashAlgorithmName]::SHA256
-
-        $SignatureBytes = $RsaSigner.SignData($ChallengeBytes, $HashAlgorithm, $Padding)
-        $SignatureBase64 = [Convert]::ToBase64String($SignatureBytes)
-
-        $PublicKeyBytes = $TpmKey.Export([System.Security.Cryptography.CngKeyBlobFormat]::GenericPublicBlob)
-        $PublicKeyBase64 = [Convert]::ToBase64String($PublicKeyBytes)
-
-        return [PSCustomObject]@{
-            OriginalString  = $StringToSign
-            PublicKeyBase64 = $PublicKeyBase64
-            SignatureBase64 = $SignatureBase64
-        }
-    } catch {
-        return $null
-    }
-}
-
-function Test-MyTpmProof {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$OriginalString,
-
-        [Parameter(Mandatory = $true)]
-        [string]$PublicKeyBase64,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SignatureBase64
-    )
-
-    try {
-        $CleanPublicKey = $PublicKeyBase64 -replace '\s+'
-        $CleanSignature = $SignatureBase64 -replace '\s+'
-
-        $PublicKeyBytes = [Convert]::FromBase64String($CleanPublicKey)
-        $SignatureBytes = [Convert]::FromBase64String($CleanSignature)
-        $DataBytes = [System.Text.Encoding]::UTF8.GetBytes($OriginalString)
-
-        $CngKeyBlobFormat = [System.Security.Cryptography.CngKeyBlobFormat]::GenericPublicBlob
-        $CngKey = [System.Security.Cryptography.CngKey]::Import($PublicKeyBytes, $CngKeyBlobFormat)
-        $Rsa = New-Object System.Security.Cryptography.RSACng($CngKey)
-
-        $Padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-        $HashAlgorithm = [System.Security.Cryptography.HashAlgorithmName]::SHA256
-
-        $IsValid = $Rsa.VerifyData($DataBytes, $SignatureBytes, $HashAlgorithm, $Padding)
-        return $IsValid;
-    } catch {
-        return $false
-    }
-}
-
-function Test-LocalAttestation {
-    try {
-        Remove-TpmKey -KeyName $KeyName -ErrorAction SilentlyContinue
-
-        $CryptoPayload = Protect-DataWithTpmKey -StringToSign "TPM_INFO_TOOL_KEY"
-
-        if ($null -ne $CryptoPayload) {
-            return Test-MyTpmProof -OriginalString $CryptoPayload.OriginalString `
-                                   -PublicKeyBase64 $CryptoPayload.PublicKeyBase64 `
-                                   -SignatureBase64 $CryptoPayload.SignatureBase64
-        } else {
-            return $false
-        }
-    }
-    catch {
-        return $false
-    }
-    finally {
-        Remove-TpmKey -KeyName $KeyName -ErrorAction SilentlyContinue
     }
 }
 
@@ -2206,11 +2106,15 @@ function Get-TpmEkChainInfo {
     }
 }
 
-function Test-PostRebootScript {
-    $path = "$env:ProgramData\TPM-INFO-TOOL\PostReboot.ps1"
-    return Test-Path -Path $path
-}
+function Test-TpmInfoToolFiles {
+    $scriptPath = "$env:ProgramData\TPM-INFO-TOOL\PostReboot.ps1"
+    $logPath    = "$env:ProgramData\TPM-INFO-TOOL\certs\Import CAs.log"
 
+    [PSCustomObject]@{
+        PostReboot   = Test-Path -Path $scriptPath
+        ImportCAsLog = Test-Path -Path $logPath
+    }
+}
 function Test-CompatibilityFlag {
     [CmdletBinding()]
     param(
@@ -2935,13 +2839,35 @@ function Get-TpmDiagnosticsInfo {
             IsInstalled = $false
             ekchain     = ""
             ekchainNV   = ""
+            AnyFail     = $false
+            Mismatch    = $false
         }
     }
 
-    return [PSCustomObject]@{
+    $ekchain   = Get-TPMEkChainStatus -Target "ekchain"
+    $ekchainNV = Get-TPMEkChainStatus -Target "ekchainNV"
+
+    $anyFail = $ekchain.Fail -or $ekchainNV.Fail
+
+    $mismatch = (
+        $ekchain.dwErrorStatus -ne $ekchainNV.dwErrorStatus -or
+        $ekchain.dwInfoStatus  -ne $ekchainNV.dwInfoStatus
+    )
+
+    if ($ekchainNV.dwInfoStatus -eq "No EK Cert in NV RAM" -or
+        [string]::IsNullOrWhiteSpace($ekchain.dwErrorStatus) -or
+        [string]::IsNullOrWhiteSpace($ekchain.dwInfoStatus) -or
+        [string]::IsNullOrWhiteSpace($ekchainNV.dwErrorStatus) -or
+        [string]::IsNullOrWhiteSpace($ekchainNV.dwInfoStatus)) {
+        $mismatch = $false
+    }
+
+    [PSCustomObject]@{
         IsInstalled = $true
-        ekchain     = Get-TPMEkChainStatus -Target "ekchain"
-        ekchainNV   = Get-TPMEkChainStatus -Target "ekchainNV"
+        ekchain     = $ekchain
+        ekchainNV   = $ekchainNV
+        AnyFail     = $anyFail
+        Mismatch    = $mismatch
     }
 }
 
@@ -3050,97 +2976,8 @@ function Invoke-TPMDiagnostics {
     }
 
     $output = & TPMDiagnostics.exe $Arguments 2>&1
+    Get-ChildItem -Path . , $env:TEMP -Filter "ekcert*.binary" -ErrorAction SilentlyContinue | Remove-Item -Force
     return ($output -join "`n")
-}
-
-function ConvertFrom-HexBitmask {
-    param(
-        [string]$HexStatus,
-        [hashtable]$FlagMap,
-        [string]$ZeroMessage
-    )
-
-    if ([string]::IsNullOrWhiteSpace($HexStatus)) { return $null }
-
-    $cleanHex = $HexStatus.Trim()
-    $val = [uint32]$cleanHex
-
-    if ($val -eq 0) {
-        return "$ZeroMessage $cleanHex"
-    }
-
-    $matchedFlags = foreach ($flagHex in $FlagMap.Keys) {
-        if (($val -band $flagHex) -eq $flagHex) {
-            $FlagMap[$flagHex]
-        }
-    }
-
-    if ($matchedFlags) {
-        return "$($matchedFlags -join ' | ') $cleanHex"
-    } else {
-        return "UNKNOWN_FLAG $cleanHex"
-    }
-}
-
-function Get-TpmNvIndexes {
-    [CmdletBinding()]
-    param([int]$MinSizeBytes = 0)
-
-    $standardEkIndexes = @('0x01c00002', '0x01c0000a', '0x01c00014', '0x01c00016')
-    $nvInfo = Invoke-TPMDiagnostics -Arguments "EnumNVIndexes"
-    $blocks = $nvInfo -split '(?m)(?=^NV Public:)'
-
-    foreach ($block in $blocks) {
-        if ($block -match 'NV Public:\s+(0x[0-9a-fA-F]+)' -and $block -match 'dataSize:\s+0x[0-9a-fA-F]+\s+\((\d+)\)') {
-            $indexHex  = $Matches[1]
-            $sizeBytes = [int]$Matches[2]
-
-            if ($sizeBytes -ge $MinSizeBytes) {
-                [PSCustomObject]@{
-                    Index      = $indexHex
-                    Size       = $sizeBytes
-                    IsStandard = $standardEkIndexes -contains $indexHex.ToLower()
-                }
-            }
-        }
-    }
-}
-
-function Get-Asn1CertificateFromBytes {
-    param([byte[]]$Bytes)
-
-    if (-not $Bytes -or $Bytes.Length -lt 20) { return $null }
-
-    for ($i = 0; $i -lt $Bytes.Length - 4; $i++) {
-        if ($Bytes[$i] -ne 0x30) { continue }
-
-        $lenByte = [int]$Bytes[$i + 1]
-        if (($lenByte -band 0x80) -eq 0) {
-            $headerLen  = 2
-            $contentLen = $lenByte
-        } else {
-            $numLenBytes = $lenByte -band 0x7F
-            if ($numLenBytes -lt 1 -or $numLenBytes -gt 4) { continue }
-            if (($i + 2 + $numLenBytes) -gt $Bytes.Length) { continue }
-
-            $contentLen = [long]0
-            for ($j = 0; $j -lt $numLenBytes; $j++) {
-                $contentLen = ($contentLen -shl 8) -bor [long]$Bytes[$i + 2 + $j]
-            }
-            $headerLen = 2 + $numLenBytes
-        }
-
-        $totalLen = $headerLen + $contentLen
-        if ($totalLen -lt 200 -or ($i + $totalLen) -gt $Bytes.Length) { continue }
-
-        try {
-            $raw = New-Object byte[] $totalLen
-            [Array]::Copy($Bytes, $i, $raw, 0, $totalLen)
-            return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($raw)
-        } catch {}
-    }
-
-    return $null
 }
 
 # =========================================================================
@@ -3161,54 +2998,39 @@ function Get-TPMEkChainStatus {
         return $_
     }
 
-    if ($text -match '0x80070490' -or $text -match 'Element not found') {
-        $errStatus = ""
+    if ($text -match '0x80070490|Element not found') {
         return [PSCustomObject]@{
-            "Chain"         = "NV Memory"
-            "dwErrorStatus" = $errStatus
-            "dwInfoStatus"  = "No EK Cert in NV RAM"
-            "Color"         = if ($errStatus -eq '0x10008') { 'red' } else { '' }
+            Chain         = "NV Memory"
+            dwErrorStatus = ""
+            dwInfoStatus  = "No EK Cert in NV RAM"
+            Fail          = $false
+            Color         = "White"
         }
     }
-
-    $results = @()
-    $hasMismatch = $false
 
     if ($text -match '(?m)Cert Chain\s+cChain:\s*(\d+)\s+Trust\s+dwErrorStatus:\s*(0x[0-9a-fA-F]+)(?:,\s*dwInfoStatus:\s*(0x[0-9a-fA-F]+))?') {
-        $errStatus = $Matches[2]
-        if ($errStatus -eq '0x10008') { $hasMismatch = $true }
+        $errorStatus = $Matches[2]
+        $infoStatus  = if ($Matches[3]) { $Matches[3] } else { "0x0" }
+        $fail        = $errorStatus -eq "0x10008"
 
-        $results += [PSCustomObject]@{
-            "Chain"         = "Summary Total: $($Matches[1])"
-            "dwErrorStatus" = $errStatus
-            "dwInfoStatus"  = if ($Matches[3]) { $Matches[3] } else { "0x0" }
-            "Color"         = if ($errStatus -eq '0x10008') { 'red' } else { '' }
+        return [PSCustomObject]@{
+            Chain         = "$($Target)"
+            dwErrorStatus = $errorStatus
+            dwInfoStatus  = $infoStatus
+            Fail          = $fail
+            Color         = if ($fail) { "Red" } else { "White" }
         }
     }
 
-    $chainMatches = [regex]::Matches($text, '(?m)^\s*Chain\s+(\d+):[\s\S]*?Trust\s+dwErrorStatus:\s*(0x[0-9a-fA-F]+)(?:,\s*dwInfoStatus:\s*(0x[0-9a-fA-F]+))?')
-    foreach ($match in $chainMatches) {
-        $errHex  = $match.Groups[2].Value
-        $infoHex = if ($match.Groups[3].Success) { $match.Groups[3].Value } else { "0x0" }
-
-        if ($errHex -eq '0x10008') { $hasMismatch = $true }
-
-        $results += [PSCustomObject]@{
-            "Chain"         = "Chain $($match.Groups[1].Value)"
-            "dwErrorStatus" = $errHex
-            "dwInfoStatus"  = $infoHex
-            "Color"         = if ($errHex -eq '0x10008') { 'red' } else { '' }
-        }
+    return [PSCustomObject]@{
+        Chain         = "No Cert Chain found"
+        dwErrorStatus = ""
+        dwInfoStatus  = ""
+        Fail          = $false
+        Color         = "White"
     }
-
-    if ($hasMismatch) {
-        $results += [PSCustomObject]@{
-            "Mismatch" = $true
-        }
-    }
-
-    return $results
 }
+
 
 # =========================================================================
 # SHIMS
@@ -3727,7 +3549,6 @@ $RevokedShims = @(
     "2EA557C44B83C0AD6B71EFB7EDCC18B6337AD1C1D682155DD9451B051B62FF40"
 )
 
-
 # =========================================================================
 # GUI FORM FUNCTIONS
 # =========================================================================
@@ -3766,6 +3587,25 @@ $guiScript = {
     [System.Windows.Forms.Application]::add_ThreadException(
         $threadExceptionHandler
     )
+
+    function GUI-Log-Data {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string]$Text,
+
+            [Parameter(Mandatory = $false)]
+            [string]$Color = "White"
+        )
+
+        Write-Host $Text -ForegroundColor $Color
+
+        if ($null -ne $syncHash -and $null -ne $syncHash.DataBuffer) {
+            $syncHash.DataBuffer.Add([PSCustomObject]@{
+                Text  = $Text
+                Color = $Color
+            })
+        }
+    }
 
     function Export-ReportToImage {
         param(
@@ -3960,117 +3800,289 @@ $guiScript = {
         }
     }
 
-    function Run-PowerShell {
-        param (
-            [string]$FunctionName,
-            [object[]]$FunctionArgs
-        )
+function Run-PowerShell {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FunctionName,
+        [Parameter(Mandatory=$false)]
+        [object[]]$FunctionArgs,
+        [Parameter(Mandatory=$false)]
+        [string[]]$HelperFunction
+    )
 
-        $sync = [hashtable]::Synchronized(@{ ProcId = $null })
+    $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = ">>Running $($FunctionName)" })
 
-        $runspace = [runspacefactory]::CreateRunspace()
-        $runspace.ApartmentState = 'STA'
-        $runspace.Open()
-        $psUI = [powershell]::Create()
-        $psUI.Runspace = $runspace
+    $sync = [hashtable]::Synchronized(@{ ProcId=$null })
+    $pipeName = $syncHash.PipeName
+    $pipe = New-Object System.IO.Pipes.NamedPipeServerStream(
+        $pipeName,
+        [System.IO.Pipes.PipeDirection]::In,
+        1,
+        [System.IO.Pipes.PipeTransmissionMode]::Message,
+        [System.IO.Pipes.PipeOptions]::Asynchronous
+    )
 
-        [void]$psUI.AddScript({
-            param($sync)
-            Add-Type -AssemblyName System.Windows.Forms
+    $connectionResult = $pipe.BeginWaitForConnection($null,$null)
 
-            $form = New-Object System.Windows.Forms.Form
-            $form.Text = "Please Wait"
-            $form.Size = New-Object System.Drawing.Size(300, 100)
-            $form.StartPosition = 'CenterScreen'
-            $form.FormBorderStyle = 'FixedToolWindow'
-            $form.TopMost = $true
+    $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.ApartmentState = 'STA'
+    $runspace.Open()
 
-            $label = New-Object System.Windows.Forms.Label
-            $label.Text = "Loading ..."
-            $label.AutoSize = $true
-            $label.Location = New-Object System.Drawing.Point(40, 20)
-            $form.Controls.Add($label)
+    $psUI = [powershell]::Create()
+    $psUI.Runspace = $runspace
 
-            $timer = New-Object System.Windows.Forms.Timer
-            $timer.Interval = 30
-            $timer.Add_Tick({
-                if ($sync.ProcId) {
-                    try {
-                        $proc = [System.Diagnostics.Process]::GetProcessById($sync.ProcId)
-                        if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
-                            $timer.Stop()
-                            $form.Close()
-                        }
-                    } catch {
+    [void]$psUI.AddScript({
+        param($sync)
+
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = "Please Wait"
+        $form.Size = New-Object System.Drawing.Size(300,100)
+        $form.StartPosition = 'CenterScreen'
+        $form.FormBorderStyle = 'FixedToolWindow'
+        $form.TopMost = $true
+
+        $label = New-Object System.Windows.Forms.Label
+        $label.Text = "Loading ..."
+        $label.AutoSize = $true
+        $label.Location = New-Object System.Drawing.Point(40,20)
+        $form.Controls.Add($label)
+
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 30
+
+        $timer.Add_Tick({
+            if ($sync.ProcId) {
+                try {
+                    $proc = [System.Diagnostics.Process]::GetProcessById($sync.ProcId)
+
+                    if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
                         $timer.Stop()
                         $form.Close()
                     }
                 }
-            })
-
-            $form.Add_Shown({ $timer.Start() })
-            $form.ShowDialog()
-        }).AddArgument($sync)
-
-        $asyncHandle = $psUI.BeginInvoke()
-
-        $envPrefix = "PSARGS_$([Guid]::NewGuid().ToString('N'))"
-        $chunkCount = 0
-
-        if ($null -ne $FunctionArgs -and $FunctionArgs.Count -gt 0) {
-            $serializedArgs = [System.Management.Automation.PSSerializer]::Serialize($FunctionArgs)
-            $chunkSize = 30000 # Keep safely under Windows' 32,767 char limit per variable
-            $chunkCount = [math]::Ceiling($serializedArgs.Length / $chunkSize)
-
-            for ($i = 0; $i -lt $chunkCount; $i++) {
-                $start = $i * $chunkSize
-                $len = [math]::Min($chunkSize, $serializedArgs.Length - $start)
-                [Environment]::SetEnvironmentVariable("${envPrefix}_$i", $serializedArgs.Substring($start, $len), 'Process')
+                catch {
+                    $timer.Stop()
+                    $form.Close()
+                }
             }
+        })
+
+        $form.Add_Shown({ $timer.Start() })
+        $form.ShowDialog()
+    }).AddArgument($sync)
+
+    $asyncHandle = $psUI.BeginInvoke()
+    $envPrefix = "PSARGS_$([Guid]::NewGuid().ToString('N'))"
+    $chunkCount = 0
+
+    if ($null -ne $FunctionArgs -and $FunctionArgs.Count -gt 0) {
+        $serializedArgs = [System.Management.Automation.PSSerializer]::Serialize($FunctionArgs)
+        $chunkSize = 30000
+        $chunkCount = [math]::Ceiling($serializedArgs.Length / $chunkSize)
+
+        for ($i=0; $i -lt $chunkCount; $i++) {
+            $start = $i * $chunkSize
+            $len = [math]::Min($chunkSize,$serializedArgs.Length-$start)
+
+            [Environment]::SetEnvironmentVariable(
+                "${envPrefix}_$i",
+                $serializedArgs.Substring($start,$len),
+                'Process'
+            )
+        }
+    }
+
+    $helperDefs = @"
+`$script:LogPipe = `$null
+`$script:LogWriter = `$null
+
+function GUI-Log-Data {
+    param(
+        [Parameter(Mandatory=`$true)]
+        [string]`$Text,
+        [Parameter(Mandatory=`$false)]
+        [string]`$Color = "White"
+    )
+
+    Write-Host `$Text -ForegroundColor `$Color
+
+    try {
+        if (`$null -eq `$script:LogPipe -or -not `$script:LogPipe.IsConnected) {
+            if (`$null -ne `$script:LogWriter) {
+                try { `$script:LogWriter.Dispose() } catch {}
+                `$script:LogWriter = `$null
+            }
+
+            if (`$null -ne `$script:LogPipe) {
+                try { `$script:LogPipe.Dispose() } catch {}
+                `$script:LogPipe = `$null
+            }
+
+            `$script:LogPipe = New-Object System.IO.Pipes.NamedPipeClientStream(
+                ".",
+                "$pipeName",
+                [System.IO.Pipes.PipeDirection]::Out
+            )
+
+            `$script:LogPipe.Connect(5000)
+            `$script:LogWriter = New-Object System.IO.StreamWriter(`$script:LogPipe)
+            `$script:LogWriter.AutoFlush = `$true
         }
 
-        $fnDef = (Get-Command $FunctionName).ScriptBlock.ToString()
-        $fullScript = @"
-        function $FunctionName { $fnDef }
-        try {
-            `$i = 0
-            `$serializedArgs = ''
-
-            while (`$true) {
-                `$chunk = [Environment]::GetEnvironmentVariable("${envPrefix}_`$i", 'Process')
-                if (`$null -eq `$chunk) { break }
-
-                `$serializedArgs += `$chunk
-                [Environment]::SetEnvironmentVariable("${envPrefix}_`$i", `$null, 'Process')
-                `$i++
-            }
-
-            if (![string]::IsNullOrWhiteSpace(`$serializedArgs)) {
-                `$argsList = [System.Management.Automation.PSSerializer]::Deserialize(`$serializedArgs)
-                $FunctionName @argsList
-            } else {
-                $FunctionName
-            }
-        } finally {
-            Write-Host "`nPress Enter to exit . . ." -NoNewline
-            `$null = Read-Host
+        `$message = [PSCustomObject]@{
+            Text = "::" + `$Text
+            Color = `$Color
         }
+
+        `$json = `$message | ConvertTo-Json -Compress
+        `$script:LogWriter.WriteLine(`$json)
+    }
+    catch {
+        Write-Host "LOG PIPE ERROR: `$($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 "@
 
-        $bytes = [System.Text.Encoding]::Unicode.GetBytes($fullScript)
-        $encodedCommand = [Convert]::ToBase64String($bytes)
+    if ($null -ne $HelperFunction) {
+        foreach ($helperName in $HelperFunction) {
+            if ([string]::IsNullOrWhiteSpace($helperName)) { continue }
 
-        $proc = Start-Process powershell.exe -ArgumentList "-NoProfile", "-EncodedCommand", $encodedCommand -PassThru
-        $sync.ProcId = $proc.Id
+            $helperCmd = Get-Command -Name $helperName -ErrorAction Stop
+            $helperDef = $helperCmd.ScriptBlock.ToString()
 
-        for ($i = 0; $i -lt $chunkCount; $i++) {
-            [Environment]::SetEnvironmentVariable("${envPrefix}_$i", $null, 'Process')
+            $helperDefs += @"
+
+function $helperName {
+$helperDef
+}
+
+"@
+        }
+    }
+
+    $fnDef = (Get-Command $FunctionName -ErrorAction Stop).ScriptBlock.ToString()
+
+    $fullScript = @"
+$helperDefs
+
+function $FunctionName {
+$fnDef
+}
+
+try {
+    `$i = 0
+    `$serializedArgs = ''
+
+    while (`$true) {
+        `$chunk = [Environment]::GetEnvironmentVariable(
+            "${envPrefix}_`$i",
+            'Process'
+        )
+
+        if (`$null -eq `$chunk) { break }
+
+        `$serializedArgs += `$chunk
+
+        [Environment]::SetEnvironmentVariable(
+            "${envPrefix}_`$i",
+            `$null,
+            'Process'
+        )
+
+        `$i++
+    }
+
+    if (![string]::IsNullOrWhiteSpace(`$serializedArgs)) {
+        `$argsList = [System.Management.Automation.PSSerializer]::Deserialize(`$serializedArgs)
+        & $FunctionName @argsList
+    }
+    else {
+        & $FunctionName
+    }
+}
+finally {
+    if (`$null -ne `$script:LogWriter) {
+        try { `$script:LogWriter.Flush() } catch {}
+        try { `$script:LogWriter.Dispose() } catch {}
+        `$script:LogWriter = `$null
+    }
+
+    if (`$null -ne `$script:LogPipe) {
+        try { `$script:LogPipe.Dispose() } catch {}
+        `$script:LogPipe = `$null
+    }
+
+    Write-Host "`nPress Enter to exit . . ." -NoNewline
+    `$null = Read-Host
+}
+"@
+
+    $bytes = [System.Text.Encoding]::Unicode.GetBytes($fullScript)
+    $encodedCommand = [Convert]::ToBase64String($bytes)
+
+    $proc = Start-Process powershell.exe -ArgumentList @(
+        "-NoProfile"
+        "-EncodedCommand"
+        $encodedCommand
+    ) -PassThru
+
+    $sync.ProcId = $proc.Id
+
+    for ($i=0; $i -lt $chunkCount; $i++) {
+        [Environment]::SetEnvironmentVariable(
+            "${envPrefix}_$i",
+            $null,
+            'Process'
+        )
+    }
+
+    while (-not $connectionResult.AsyncWaitHandle.WaitOne(25)) {
+        [System.Windows.Forms.Application]::DoEvents()
+        if ($proc.HasExited) { break }
+    }
+
+    if (-not $proc.HasExited) {
+        try { $pipe.EndWaitForConnection($connectionResult) } catch {}
+    }
+
+    if ($pipe.IsConnected) {
+        $reader = New-Object System.IO.StreamReader($pipe)
+
+        while ($true) {
+            try {
+                $line = $reader.ReadLine()
+                if ($null -eq $line) { break }
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+                try {
+                    $message = $line | ConvertFrom-Json
+
+                    if ($null -ne $message.Text) {
+                        $syncHash.DataBuffer.Add(
+                            [PSCustomObject]@{
+                                Text = [string]$message.Text
+                                Color = [string]$message.Color
+                            }
+                        )
+                    }
+                }
+                catch {}
+            }
+            catch { break }
         }
 
-        [void]$psUI.EndInvoke($asyncHandle)
-        $runspace.Close()
-        $runspace.Dispose()
+        $reader.Dispose()
     }
+
+    $pipe.Dispose()
+    [void]$psUI.EndInvoke($asyncHandle)
+    $runspace.Close()
+    $runspace.Dispose()
+}
 
     function ViewWindowsComponentRepairedIssues {
         $logFiles = Get-ChildItem "$env:windir\Logs\CBS\CBS*.log", "$env:windir\Logs\DISM\dism*.log" -ErrorAction SilentlyContinue
@@ -4292,7 +4304,164 @@ $postRebootScript = @'
     function Install-TPMDiagnostic {
         Write-Host "TPM Diagnostic is VERY slow to install. Come back in 30 minutes!" -ForegroundColor Yellow
         DISM /Online /Add-Capability /CapabilityName:Tpm.TpmDiagnostics~~~~0.0.1.0
+		Write-Host "Please re-run tool"
     }
+
+    function Run-CertChainRepair {
+        function Import-CerFilesToCAStore {
+            $outDir = Join-Path -Path $env:ProgramData -ChildPath "TPM-INFO-TOOL\certs"
+            $logPath = Join-Path -Path $outDir -ChildPath "Import CAs.log"
+
+            function Write-Log {
+                param (
+                    [Parameter(Mandatory = $true)]
+                    [string]$Message
+                )
+
+                $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                $logEntry = "[$timestamp] $Message"
+
+                Add-Content -Path $logPath -Value $logEntry
+                GUI-Log-Data $Message
+            }
+
+            Write-Log "Starting .cer certificate import process."
+
+            $certStorePath = "Cert:\LocalMachine\CA"
+            $cerFiles = Get-ChildItem -Path $outDir -Filter "*.cer" -File -ErrorAction SilentlyContinue
+
+            foreach ($file in $cerFiles) {
+                try {
+                    $importedCert = Import-Certificate -FilePath $file.FullName -CertStoreLocation $certStorePath -ErrorAction Stop
+                    $certName = if ($importedCert.FriendlyName) { $importedCert.FriendlyName } else { $importedCert.Subject }
+
+                    Write-Log "Successfully imported '$($file.Name)' [Cert Name: '$certName' | Thumbprint: '$($importedCert.Thumbprint)'] into store '$certStorePath'."
+                }
+                catch {
+                    Write-Log "Failed to import '$($file.Name)': $_"
+                }
+            }
+
+            Write-Log "Certificate import completed."
+        }
+
+        GUI-Log-Data "==Display EK chain==" Cyan
+        TpmDiagnostics.exe ekchain
+
+        GUI-Log-Data "==Reinstall EK certificate from TPM NV==" Cyan
+        TpmDiagnostics.exe InstallEkCertFromNVR
+
+        GUI-Log-Data "==Clear Stale ActivisionAIK==" Cyan
+        Reset-ActivisionKey
+
+        GUI-Log-Data "==Export NVRAM Certs==" Cyan
+        Export-TpmCertificates
+
+        GUI-Log-Data "==Import Lower Certs ==" Cyan
+        Import-CerFilesToCAStore
+
+        GUI-Log-Data "==Display EK chain==" Cyan
+        TpmDiagnostics.exe ekchain
+
+        Get-ChildItem -Path . , $env:TEMP -Filter "ekcert*.binary" -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
+
+    function Export-TpmCertificates {
+        $OutDir = "$($env:ProgramData)\TPM-INFO-TOOL\certs"
+        $MinSizeBytes = 500
+
+        New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+        Write-Host "--- Scanning TPM NVRAM for Certificate Indices ---" -ForegroundColor Cyan
+
+        $nvInfo = TPMDiagnostics.exe EnumNVIndexes 2>&1 | Out-String
+        $pattern = 'NV Public:\s+(0x[0-9a-fA-F]+)[\s\S]*?dataSize:\s+0x[0-9a-fA-F]+\s+\((\d+)\)'
+        $matches = [regex]::Matches($nvInfo, $pattern)
+
+        $certCandidates = @()
+        foreach ($m in $matches) {
+            $indexHex = $m.Groups[1].Value
+            $sizeBytes = [int]$m.Groups[2].Value
+
+            if ($sizeBytes -ge $MinSizeBytes) {
+                Write-Host "Found potential certificate container at $indexHex (Size: $sizeBytes bytes)" -ForegroundColor Green
+                $certCandidates += [PSCustomObject]@{
+                    Index = $indexHex
+                    Size  = $sizeBytes
+                }
+            }
+        }
+
+        if ($certCandidates.Count -eq 0) {
+            Write-Host "`nNo NV indices large enough (>= $MinSizeBytes bytes) to store X.509 certificates were found in NVRAM." -ForegroundColor Yellow
+            return
+        }
+
+        foreach ($candidate in $certCandidates) {
+            $dumpFile = Join-Path $env:TEMP "TPM-Dump-$($candidate.Index).bin"
+            GUI-Log-Data "`nDumping $($candidate.Index)..." Cyan
+
+            TPMDiagnostics.exe ReadNVIndex $($candidate.Index) -file $dumpFile | Out-Null
+
+            if (-not (Test-Path $dumpFile)) {
+                Write-Host "Failed to read $($candidate.Index) (Access Denied or Unauthorized)" -ForegroundColor Red
+                continue
+            }
+
+            $b = [IO.File]::ReadAllBytes($dumpFile)
+            $found = @()
+
+            for ($i = 0; $i -lt $b.Length - 4; $i++) {
+                if ($b[$i] -ne 0x30) { continue }
+                $lenByte = $b[$i + 1]
+
+                if (($lenByte -band 0x80) -eq 0) {
+                    $headerLen = 2
+                    $contentLen = $lenByte
+                } else {
+                    $numLenBytes = $lenByte -band 0x7F
+                    if ($numLenBytes -lt 1 -or $numLenBytes -gt 4) { continue }
+                    if (($i + 2 + $numLenBytes) -gt $b.Length) { continue }
+
+                    $contentLen = 0
+                    for ($j = 0; $j -lt $numLenBytes; $j++) {
+                        $contentLen = ($contentLen -shl 8) -bor $b[$i + 2 + $j]
+                    }
+                    $headerLen = 2 + $numLenBytes
+                }
+
+                $totalLen = $headerLen + $contentLen
+                if ($totalLen -lt 200 -or ($i + $totalLen) -gt $b.Length) { continue }
+
+                try {
+                    $raw = New-Object byte[] $totalLen
+                    [Array]::Copy($b, $i, $raw, 0, $totalLen)
+                    $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($raw)
+                    $found += [PSCustomObject]@{ Offset = $i; Raw = $raw; Cert = $cert }
+
+                    $i += $totalLen - 1
+                } catch {}
+            }
+
+            if ($found.Count -gt 0) {
+                GUI-Log-Data "SUCCESS: Found $($found.Count) certificate structure(s) inside index $($candidate.Index)!" Green
+                $n = 1
+                foreach ($x in $found) {
+                    $cerFile = Join-Path $OutDir ("Cert-$($candidate.Index)-$n.cer")
+                    [IO.File]::WriteAllBytes($cerFile, $x.Raw)
+
+                    GUI-Log-Data "  [$n] Subject : $($x.Cert.Subject)"
+                    GUI-Log-Data "      Issuer  : $($x.Cert.Issuer)"
+                    GUI-Log-Data "      Saved   : $cerFile"
+                    $n++
+                }
+            } else {
+                GUI-Log-Data "Index $($candidate.Index) read successfully, but contained no valid X.509 certificate headers." Yellow
+            }
+
+            Remove-Item $dumpFile -ErrorAction SilentlyContinue
+        }
+    }
+
 
 # =========================================================================
 # GUI FORM
@@ -4334,6 +4503,9 @@ $postRebootScript = @'
     # ==========================================
     $menuStrip = New-Object System.Windows.Forms.MenuStrip
 
+    $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
+    $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+
     # --- Advanced Menu ---
     $menuAdvanced = New-Object System.Windows.Forms.ToolStripMenuItem("Advanced")
 
@@ -4344,7 +4516,7 @@ $postRebootScript = @'
                 Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
             } elseif (-not $syncHash.Data.BiosInfo.ReasonablePassed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
                 Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
-            } elseif ($syncHash.Data.PostRebootScript) {
+            } elseif ($syncHash.Data.TestInfooolScripts.PostReboot) {
                 Show-MessageBox -Title "Status" -Description "Fix already attempted."
             } else {
                 $runScript = [System.Windows.Forms.MessageBox]::Show(
@@ -4369,7 +4541,6 @@ $postRebootScript = @'
                     return
                 }
 
-                $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = "Running Reset-WindowsCache" })
                 Run-PowerShell -FunctionName "Reset-WindowsCache"
             }
         }
@@ -4379,6 +4550,23 @@ $postRebootScript = @'
     $itemRepairSfc.Add_Click({
         Run-PowerShell -FunctionName "RepairWindowsFiles"
     })
+
+	$menuAdvanced.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+    if ($isWin11 -and (-not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0)) {
+        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
+
+        $itemInstallTPMDiag.add_Click({
+            param($sender, $e)
+            Run-PowerShell -FunctionName "Install-TPMDiagnostic"
+        })
+    }elseif ($tpmInstalled){
+		$itemInstallTPMDiag = $menuAdvanced.DropDownItems.Add("Windows TPM Diagnostic already installed")
+		$itemInstallTPMDiag.Enabled = $false
+	}else {
+		$itemInstallTPMDiag = $menuAdvanced.DropDownItems.Add("Windows TPM Diagnostic not available")
+		$itemInstallTPMDiag.Enabled = $false
+	}
 
     # --- Dev Menu ---
     $menuDev = New-Object System.Windows.Forms.ToolStripMenuItem("Dev")
@@ -4428,18 +4616,48 @@ $postRebootScript = @'
         $help.Enabled   = $true
     }
 
-    $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
-    $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+    $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
-    if ($isWin11 -and (-not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0)) {
-        $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
-        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
+    $ItemCertChainRepair = $menuDev.DropDownItems.Add("Attempt Certificate Chain Repair")
+    $ItemCertChainRepair.Add_Click({
+        if (Get-LoadingStatus($syncHash.Data)) {
+            $runCertChainRepair = $false
 
-        $itemInstallTPMDiag.add_Click({
-            param($sender, $e)
-            Run-PowerShell -FunctionName "Install-TPMDiagnostic"
-        })
+            if (-not $Data.TpmDiagnosticsInfo.Mismatch -and -not $Data.TpmDiagnosticsInfo.AnyFail) {
+                Show-MessageBox -Title "Status" -Description "This is not the right fix."
+            }elseif ($syncHash.Data.CpuInfo.isIntel11GenOrLater) {
+                Show-MessageBox -Title "Status" -Description "This fix is only available on Intel 11 gen or later."
+            }elseif ($syncHash.Data.OverallPassResult -eq 1 -or -not $syncHash.Data.IntelBiosInfo.IsIntel) {
+                Show-MessageBox -Title "Status" -Description "This PC does not have intermediate Cert issues."
+            } elseif (-not $syncHash.Data.BiosInfo.Passed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
+                Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
+            } elseif (-not $syncHash.Data.TestInfooolScripts.PostReboot) {
+                Show-MessageBox -Title "Status" -Description "Please run 'Attempt TPM 'State Mismatch Repair' first."
+            } else {
+                $runScript = [System.Windows.Forms.MessageBox]::Show(
+                     "Please only run this if your PC has certificate chain issues. Please make sure you are running the latest BIOS and IME. `n`nDo you want to continue?",
+                     'Warning',
+                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                     [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+
+                if ($runScript -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return;
+                }
+                $runCertChainRepair = $true
+            }
+
+            if($runCertChainRepair){
+                Run-PowerShell -FunctionName "Run-CertChainRepair" -HelperFunction @("Export-TpmCertificates", "Reset-ActivisionKey")
+            }
+        }
+    })
+
+    if (-not ($isWin11 -and $tpmInstalled) ) {
+        $ItemCertChainRepair.ForeColor = [System.Drawing.Color]::Gray
+        $ItemCertChainRepair.Enabled = $false
     }
+
 
     $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $itemRunTpmMsc = $menuDev.DropDownItems.Add("tpm.msc")
@@ -5014,12 +5232,6 @@ function Show-UIOutput ($Data) {
         Log-Output "UAC $($Data.UACLevel)" Yellow
     }
 
-    if ($Data.TestLocalAttestation) {
-        Log-Output "[PASS] Local Attestation Test" Green
-    } else {
-        Log-Output "[FAIL] Local Attestation Test" Red
-    }
-
     if ($Data.MicrosoftCa.Passed) {
         Log-Output "[PASS] CA 2023: $($Data.MicrosoftCA.OverallState)" Green
     } else {
@@ -5102,11 +5314,9 @@ function Show-UIOutput ($Data) {
         Log-Output "INFO: Reg DisableStrictValidation" 'DarkYellow'
     }
 
-    if($Data.PostRebootScript) {
-        Log-Output "INFO: PostReboot"
-    }else{
-        Log-Output "INFO: No PostReboot"
-    }
+    $scriptStatus = if ($Data.TestInfooolScripts.PostRebootScriptExists) { "T" } else { "F" }
+    $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLogExists)     { "T" } else { "F" }
+    Log-Output "INFO: PostReboot: $scriptStatus | ImportCA: $logStatus"
 
     $consoleOption = $true
     if ($Data.Randgrid.AnyFailed) {
@@ -5239,16 +5449,16 @@ function Show-UIOutput ($Data) {
         Log-Output "" 'White'
     }
 
-    if($Data.TpmDiagnosticsInfo.isInstalled) {
+    if ($Data.TpmDiagnosticsInfo.IsInstalled) {
         Log-Output "`n--- TPM DIAGNOSTIC ---" 'Cyan'
+        Log-Output ("{0,-9} | {1,-8} | {2}" -f "", "dwError", "dwInfo") 'White'
 
-        Log-Output  ("{0,-16} | {1,-8} | {2}" -f "", "dwError", "dwInfo") 'White'
-        $Data.TpmDiagnosticsInfo.ekchain | ForEach-Object {
-            Log-Output ("{0,-16} | {1,-8} | {2}" -f $_.Chain, $_.dwErrorStatus, $_.dwInfoStatus) $_.Color
+        $Data.TpmDiagnosticsInfo.ekchain, $Data.TpmDiagnosticsInfo.ekchainNV | ForEach-Object {
+            Log-Output ("{0,-9} | {1,-8} | {2}" -f $_.Chain, $_.dwErrorStatus, $_.dwInfoStatus) $_.Color
         }
-        Write-GuiHost ""
-        $Data.TpmDiagnosticsInfo.ekchainNV | ForEach-Object {
-            Log-Output ("{0,-16} | {1,-8} | {2}" -f $_.Chain, $_.dwErrorStatus, $_.dwInfoStatus) $_.Color
+        Log-Output ""
+        if($Data.TpmDiagnosticsInfo.Mismatch -or $Data.TpmDiagnosticsInfo.AnyFail){
+            Log-Output "[FAIL] Likely state mismatch`n" red
         }
     }
 
@@ -5339,7 +5549,6 @@ function Invoke-MainExecution {
         TpmOwnership           = & $ExecStep { Get-TpmOwnershipState }
         ActivisionKey          = & $ExecStep { Get-ActivisionKeyStatus }
         GetEvent1040Details    = & $ExecStep { Get-Event1040Details }
-        TestLocalAttestation   = & $ExecStep { Test-LocalAttestation }
         CodBroker              = & $ExecStep { Get-CodBrokerStatus }
         Randgrid               = & $ExecStep { Get-AtviServiceInfo }
         BrokerExe              = & $ExecStep { Get-CODBrokerInfo }
@@ -5384,7 +5593,7 @@ function Invoke-MainExecution {
         AutoProvision          = & $ExecStep { Test-TpmNoAutoProvisionExists }
         StrictValidation       = & $ExecStep { Test-TpmDisableStrictValidationExists }
         GetPCR                 = & $ExecStep { Get-PCR }
-        PostRebootScript       = & $ExecStep { Test-PostRebootScript }
+        TestInfooolScripts     = & $ExecStep { Test-TpmInfoToolFiles }
         DismHealthStatus       = & $ExecStep { Test-DismHealth }
         TpmDiagnosticsInfo     = & $ExecStep { Get-TpmDiagnosticsInfo }
     }
