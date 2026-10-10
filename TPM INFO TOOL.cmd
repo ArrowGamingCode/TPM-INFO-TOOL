@@ -4554,7 +4554,7 @@ $postRebootScript = @'
 	$menuAdvanced.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
     if ($isWin11 -and (-not $tpmInstalled -or $env:TPM_TEST_FILE -gt 0)) {
-        $itemInstallTPMDiag = $menuDev.DropDownItems.Add("Install Windows TPM Diagnostic")
+        $itemInstallTPMDiag = $menuAdvanced.DropDownItems.Add("Install Windows TPM Diagnostic")
 
         $itemInstallTPMDiag.add_Click({
             param($sender, $e)
@@ -4623,7 +4623,7 @@ $postRebootScript = @'
         if (Get-LoadingStatus($syncHash.Data)) {
             $runCertChainRepair = $false
 
-            if (-not $Data.TpmDiagnosticsInfo.Mismatch -and -not $Data.TpmDiagnosticsInfo.AnyFail) {
+            if (-not $syncHash.Data.TpmDiagnosticsInfo.Mismatch -and -not $syncHash.Data.TpmDiagnosticsInfo.AnyFail) {
                 Show-MessageBox -Title "Status" -Description "This is not the right fix."
             }elseif ($syncHash.Data.CpuInfo.isIntel11GenOrLater) {
                 Show-MessageBox -Title "Status" -Description "This fix is only available on Intel 11 gen or later."
@@ -5314,8 +5314,8 @@ function Show-UIOutput ($Data) {
         Log-Output "INFO: Reg DisableStrictValidation" 'DarkYellow'
     }
 
-    $scriptStatus = if ($Data.TestInfooolScripts.PostRebootScriptExists) { "T" } else { "F" }
-    $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLogExists)     { "T" } else { "F" }
+    $scriptStatus = if ($Data.TestInfooolScripts.PostRebootScript) { "T" } else { "F" }
+    $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLog)     { "T" } else { "F" }
     Log-Output "INFO: PostReboot: $scriptStatus | ImportCA: $logStatus"
 
     $consoleOption = $true
