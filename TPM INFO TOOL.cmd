@@ -5763,9 +5763,18 @@ $postRebootScript = @'
         Start-Process "tpm.msc"
     })
 
+    # --- About Menu ---
+    $menuAbout = New-Object System.Windows.Forms.ToolStripMenuItem("About")
+	$menuAbout.Alignment = [System.Windows.Forms.ToolStripItemAlignment]::Right
+
+    $itemAboutWebsite = $menuAbout.DropDownItems.Add("Visit Website - arrowGaming.dev")
+	$itemAboutWebsite.Add_Click({ [System.Diagnostics.Process]::Start("https://" + "arrowgaming" + ".dev/tpm-info-tool") })
+	$itemAboutWebsite2 = $menuAbout.DropDownItems.Add("Visit github for latest version")
+	$itemAboutWebsite2.Add_Click({ Start-Process "https://github.com/ArrowGamingCode/TPM-INFO-TOOL" })
+
     [void]$menuStrip.Items.Add($menuAdvanced)
     [void]$menuStrip.Items.Add($menuDev)
-    [void]$menuStrip.Items.Add($menuRun)
+    [void]$menuStrip.Items.Add($menuAbout)
 
     $form.MainMenuStrip = $menuStrip
 
