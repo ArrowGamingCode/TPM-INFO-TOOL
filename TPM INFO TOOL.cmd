@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.21"
+set "TPM_TOOL_VERSION=1.0.22"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -1479,6 +1479,7 @@ function Process-PcrData ($GetPCR) {
     $PcrMismatches   = [System.Collections.Generic.List[int]]::new()
     $MatchCount      = 0
     $PcrZero         = $null
+    $LineCount       = @($GetPCR).Count
 
     foreach ($line in $GetPCR) {
         if ($line -match 'PCR\[(?<num>\d+)\]') {
@@ -1506,61 +1507,50 @@ function Process-PcrData ($GetPCR) {
         MatchCount      = $MatchCount
         PcrMismatches   = $PcrMismatches | Select-Object -Unique
         PcrZero         = $PcrZero
+        TotalLines      = $LineCount
     }
 }
 
 function Get-PCR {
     if (Get-TpmIsWBCL -HelpText $env:TpmToolType) {
-        $tcgLogValues = [ordered]@{}
-        $hardwareValues = [ordered]@{}
-        $currentSection = $null
+        # Section 0 = TCG log values, Section 1 = hardware values
+        $sections = [System.Collections.Generic.List[object]]::new()
+        $current  = [ordered]@{}
+        $sections.Add($current)
 
         tpmtool printpcr sha256 | ForEach-Object {
-            $line = $_.Trim()
+            $line = "$_".Trim()
 
-            if ($line -eq "TCG Log Value:") {
-                $currentSection = "TCG"
-                return
-            }
-            elseif ($line -eq "Hardware Value:") {
-                $currentSection = "Hardware"
-                return
-            }
-
-            if ($line -match 'PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)') {
-                $pcr = "{0:D2}" -f [int]$matches[1]
+            if ($line -match '^PCR\[(\d+)\]\s*:\s*([0-9A-Fa-f ]+)$') {
+                $pcr    = "{0:D2}" -f [int]$matches[1]
                 $digest = ($matches[2] -replace '\s+', '').ToLower()
 
-                if ($currentSection -eq "TCG") {
-                    $tcgLogValues[$pcr] = $digest
+                if ($current.Contains($pcr)) {
+                    $current = [ordered]@{}
+                    $sections.Add($current)
                 }
-                elseif ($currentSection -eq "Hardware") {
-                    $hardwareValues[$pcr] = $digest
-                }
+                $current[$pcr] = $digest
             }
         }
+
+        $tcgLogValues   = $sections[0]
+        $hardwareValues = if ($sections.Count -gt 1) { $sections[1] } else { [ordered]@{} }
 
         foreach ($pcr in $tcgLogValues.Keys) {
             $tcgVal = $tcgLogValues[$pcr]
             $hwVal  = $hardwareValues[$pcr]
 
-            if ($null -eq $hwVal) {
-                $status = "MISSING HW"
-            }
-            elseif ($tcgVal -eq $hwVal) {
-                $status = "MATCH!"
-            }
-            else {
-                $status = "MISMATCH!"
-            }
+            if ($null -eq $hwVal)         { $status = "MISSING HW" }
+            elseif ($tcgVal -eq $hwVal)   { $status = "MATCH!" }
+            else                          { $status = "MISMATCH!" }
 
             "PCR[$pcr] |  $tcgVal  |  $status"
         }
     }
     else {
-       tpmtool parsetcglogs -validate |
-         Where-Object { $_ -match '^\|\s*PCR' } |
-         ForEach-Object { $_.Trim(" |!`r`n") }
+        tpmtool parsetcglogs -validate |
+            Where-Object { $_ -match '^\s*\|\s*PCR' } |
+            ForEach-Object { $_.Trim(" |!`r`n") }
     }
 }
 
@@ -4025,6 +4015,7 @@ function Print-CodBrokerStatus {
 
 function Show-TcgAttestationAudit ($Data) {
     Log-Output "--- MEASURED BOOT BINARY AUDIT ---" 'Cyan'
+    Log-Output $Data.parsedTpmToolType
     Log-Output $Data.PcrData.PcrZero
 
     if ($Data.PcrData.MatchCount -eq 0) {
@@ -4035,7 +4026,7 @@ function Show-TcgAttestationAudit ($Data) {
     }
     else {
         Log-Output "[FAIL] Cryptographic Mismatch Detected! BIOS update may be required" 'Red'
-        Log-Output "-> Some PCR mismatches will result in COD not working" 'Red'
+        Log-Output "-> Some PCR mismatches will result in COD not working: $($Data.PcrData.TotalLines)" 'Red'
         Log-Output "        Affected Registers: $($Data.PcrData.FailedRegisters -join ', ')" 'DarkRed'
     }
 
@@ -4542,7 +4533,6 @@ function Show-UIOutput ($Data) {
     }
 
     Log-Output "`n--- ADVANCED TPM PROPERTIES ---" 'Cyan'
-    Log-Output $Data.parsedTpmToolType
     $exclude = 'TPM Present', 'TPM Version', 'TPM Manufacturer ID', 'TPM Manufacturer Full Name', 'TPM Manufacturer Version',
                'Lockout Counter', 'Max Auth Fail', 'Lockout Interval', 'Lockout Recovery'
     foreach ($prop in $Data.ExtendedTpmProperties.PSObject.Properties) {
@@ -5767,12 +5757,12 @@ $postRebootScript = @'
 
     # --- About Menu ---
     $menuAbout = New-Object System.Windows.Forms.ToolStripMenuItem("About")
-	$menuAbout.Alignment = [System.Windows.Forms.ToolStripItemAlignment]::Right
+    $menuAbout.Alignment = [System.Windows.Forms.ToolStripItemAlignment]::Right
 
     $itemAboutWebsite = $menuAbout.DropDownItems.Add("Visit Website - arrowGaming.dev")
-	$itemAboutWebsite.Add_Click({ [System.Diagnostics.Process]::Start("https://" + "arrowgaming" + ".dev/tpm-info-tool") })
-	$itemAboutWebsite2 = $menuAbout.DropDownItems.Add("Visit github for latest version")
-	$itemAboutWebsite2.Add_Click({ Start-Process "https://github.com/ArrowGamingCode/TPM-INFO-TOOL" })
+    $itemAboutWebsite.Add_Click({ [System.Diagnostics.Process]::Start("https://" + "arrowgaming" + ".dev/tpm-info-tool") })
+    $itemAboutWebsite2 = $menuAbout.DropDownItems.Add("Visit github for latest version")
+    $itemAboutWebsite2.Add_Click({ Start-Process "https://github.com/ArrowGamingCode/TPM-INFO-TOOL" })
 
     [void]$menuStrip.Items.Add($menuAdvanced)
     [void]$menuStrip.Items.Add($menuDev)
