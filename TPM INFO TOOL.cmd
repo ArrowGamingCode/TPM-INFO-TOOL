@@ -4182,9 +4182,11 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if($Data.UefiGrubShimEntry -and $Data.PcrData.HasFailures){
-        Log-Output "Grub Found - This can cause PCR4 Mismatch erros" 'Yellow'
-        Has-Issue
+    if($Data.UefiGrubShimEntry.HasLinuxEntry -and $Data.PcrData.HasFailures){
+        Log-Output "Grub Found - This can cause PCR4 Mismatch errors" 'Yellow'
+        foreach ($e in $Data.UefiGrubShimEntry.DetectedEntries) {
+            Log-Output "  $($e.Identifier)  $($e.Description)  $($e.Path)" 'Yellow'
+        }
     }
 
     if(!$Data.IsWindowsBootFirst){
