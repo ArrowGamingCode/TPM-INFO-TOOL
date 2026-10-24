@@ -1000,6 +1000,24 @@ function Get-EfiBootSignature {
     }
 }
 
+function Get-TPMLastProvisionVersion {
+    $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\TPM\WMI"
+    $propName = "FirmwareVersionAtLastProvision"
+
+    $regData = Get-ItemProperty -Path $registryPath -Name $propName -ErrorAction SilentlyContinue
+    $FirmwareVersionAtLastProvision = $regData.$propName
+
+    $tpmInfo = Get-Tpm
+    $FirmwareVersion = if ($tpmInfo) { $tpmInfo.ManufacturerVersion } else { $null }
+
+    $isDifferent = ($FirmwareVersion -ne $FirmwareVersionAtLastProvision)
+
+    [PSCustomObject]@{
+        LastFirmwareVersion    = $FirmwareVersionAtLastProvision
+        IsDifferent            = $isDifferent
+    }
+}
+
 # -------------------------------------------------------------------------
 # Secure Boot
 # -------------------------------------------------------------------------
@@ -3514,6 +3532,7 @@ $syncHash.Checks = [ordered]@{
     AutoProvision            = New-Check "Test-TpmNoAutoProvisionExists"
     StrictValidation         = New-Check "Test-TpmDisableStrictValidationExists"
     TestInfooolScripts       = New-Check "Test-TpmInfoToolFiles"
+    TPMLastProvision         = New-Check "Get-TPMLastProvisionVersion"
 }
 
 
@@ -4312,6 +4331,7 @@ function Show-UIOutput ($Data) {
     }
     Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
+
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
     Log-Output "Chipset:      $($Data.ChipsetVersion)"
     Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
@@ -4463,6 +4483,13 @@ function Show-UIOutput ($Data) {
     $scriptStatus = if ($Data.TestInfooolScripts.PostReboot) { "T" } else { "F" }
     $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLog)     { "T" } else { "F" }
     Log-Output "INFO: PostReboot: $scriptStatus | ImportCA: $logStatus"
+
+    if($Data.TPMLastProvision.IsDifferent){
+        Log-Output "Last Provision:  $($Data.TPMLastProvision.LastFirmwareVersion)"
+    }else{
+        Log-Output "[PASS] Last Provision" 'Green'
+    }
+
 
     $consoleOption = $true
     if ($Data.Randgrid.AnyFailed) {
@@ -5602,15 +5629,19 @@ $postRebootScript = @'
     $itemResetTpm = $menuAdvanced.DropDownItems.Add("Attempt TPM 'State Mismatch' Repair")
     $itemResetTpm.Add_Click({
         if (Get-LoadingStatus($syncHash.Data)) {
-            if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.CpuInfo.Socket -eq "AM4") {
+            if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.TpmInfo.AmdFixRequired) {
                 Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
             } elseif (-not $syncHash.Data.BiosInfo.ReasonablePassed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
                 Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
             } elseif ($syncHash.Data.TestInfooolScripts.PostReboot) {
                 Show-MessageBox -Title "Status" -Description "Fix already attempted."
             } else {
+                if ($syncHash.Data.CpuInfo.Socket -eq "AM4") {
+                    Show-MessageBox -Title "Status" -Description "INFO: Some user reports suggest AM4 systems can have state-mistmatch on newer firmware."
+                }
+
                 $runScript = [System.Windows.Forms.MessageBox]::Show(
-                    "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and IME. This will reboot your PC!`n`nDo you want to continue?",
+                    "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and Intel Management Engine / AMD Chipset drivers. This will reboot your PC!`n`nDo you want to continue?",
                     'Warning',
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question
