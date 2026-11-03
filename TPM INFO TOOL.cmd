@@ -5339,6 +5339,8 @@ finally {
         Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\Content\*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$env:LocalAppData\Microsoft\CryptnetUrlCache\MetaData\*" -Force -ErrorAction SilentlyContinue
 
+        Reset-ActivisionKey
+
 $postRebootScript = @'
             Initialize-Tpm
             Enable-TpmAutoProvisioning
@@ -5627,45 +5629,69 @@ $postRebootScript = @'
     $menuAdvanced = New-Object System.Windows.Forms.ToolStripMenuItem("Advanced")
 
     $itemResetTpm = $menuAdvanced.DropDownItems.Add("Attempt TPM 'State Mismatch' Repair")
-    $itemResetTpm.Add_Click({
-        if (Get-LoadingStatus($syncHash.Data)) {
-            if ($syncHash.Data.OverallPassResult -eq 1 -or $syncHash.Data.TpmInfo.AmdFixRequired) {
-                Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
-            } elseif (-not $syncHash.Data.BiosInfo.ReasonablePassed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
-                Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
-            } elseif ($syncHash.Data.TestInfooolScripts.PostReboot) {
-                Show-MessageBox -Title "Status" -Description "Fix already attempted."
-            } else {
-                if ($syncHash.Data.CpuInfo.Socket -eq "AM4") {
-                    Show-MessageBox -Title "Status" -Description "INFO: Some user reports suggest AM4 systems can have state-mistmatch on newer firmware."
-                }
+$itemResetTpm.Add_Click({
+    if (-not (Get-LoadingStatus -Data $syncHash.Data)) {
+        return
+    }
 
-                $runScript = [System.Windows.Forms.MessageBox]::Show(
-                    "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and Intel Management Engine / AMD Chipset drivers. This will reboot your PC!`n`nDo you want to continue?",
-                    'Warning',
-                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                    [System.Windows.Forms.MessageBoxIcon]::Question
-                )
+    $data = $syncHash.Data
+    $runFix = $false
+    $isBypassableFailure = $false
 
-                if ($runScript -ne [System.Windows.Forms.DialogResult]::Yes) {
-                    return;
-                }
-
-                $runScript2 = [System.Windows.Forms.MessageBox]::Show(
-                    "Continuing will clear the TPM and you may need to re-login to the MS store or other Apps.`n`nDo you want to continue?",
-                    'Warning',
-                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                    [System.Windows.Forms.MessageBoxIcon]::Question
-                )
-
-                if ($runScript2 -ne [System.Windows.Forms.DialogResult]::Yes) {
-                    return
-                }
-
-                Run-PowerShell -FunctionName "Reset-WindowsCache"
-            }
+    if ($data.OverallPassResult -eq 1 -or $data.TpmInfo.AmdFixRequired) {
+        Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
+        if ($data.OverallPassResult -eq 1 -and -not $data.TpmInfo.AmdFixRequired) {
+            $isBypassableFailure = $true
         }
-    })
+    }
+    elseif (-not $data.BiosInfo.ReasonablePassed -or $data.BitLocker.Passed -or $data.PcrData.HasFailures) {
+        Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
+        if (-not $data.BiosInfo.ReasonablePassed -and -not $data.BitLocker.Passed -and -not $data.PcrData.HasFailures) {
+            $isBypassableFailure = $true
+        }
+    }
+    elseif ($data.TestInfooolScripts.PostReboot) {
+        Show-MessageBox -Title "Status" -Description "Fix already attempted."
+        $isBypassableFailure = $true
+    }
+    else {
+        $runFix = $true
+    }
+
+    if (-not $runFix -and $isBypassableFailure -and $syncHash.devMode) {
+        $devConfirm = [System.Windows.Forms.MessageBox]::Show(
+            "You are running in dev mode and a bypassable check failed. Would you like to bypass the check and continue anyway?",
+            'Warning',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($devConfirm -eq [System.Windows.Forms.DialogResult]::Yes) {
+            $runFix = $true
+        }
+    }
+
+    if (-not $runFix) {
+        return
+    }
+
+    if ($data.CpuInfo.Socket -eq "AM4") {
+        Show-MessageBox -Title "Status" -Description "INFO: Some user reports suggest AM4 systems can have state-mistmatch on newer firmware."
+    }
+
+    $am4Confirm = [System.Windows.Forms.MessageBox]::Show(
+        "Please only run this if your PC has TPM 'state mismatch'. Please make sure you are running the latest BIOS and Intel Management Engine / AMD Chipset drivers. This will reboot your PC!`n`nDo you want to continue?",
+        'Warning',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+
+    if ($am4Confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+        return
+    }
+
+    Run-PowerShell -FunctionName "Reset-WindowsCache" -HelperFunction @("Reset-ActivisionKey")
+})
 
     $itemRepairSfc = $menuAdvanced.DropDownItems.Add("Repair Corrupted Windows Components")
     $itemRepairSfc.Add_Click({
