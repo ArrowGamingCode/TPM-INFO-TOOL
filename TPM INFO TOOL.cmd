@@ -441,22 +441,36 @@ function Get-ChipsetDriverVersion {
     [CmdletBinding()]
     param()
 
-    $driver = Get-CimInstance Win32_PnPSignedDriver |
-        Where-Object {
-            ($_.Manufacturer -like "*Advanced Micro Devices*" -or $_.Manufacturer -like "*AMD*") -and
-            ($_.DeviceName -like "*SMBus*" -or $_.DeviceName -like "*PCI*")
-        } | Select-Object -First 1
+    $versionStr = $null
+    $isOldAMD = $false
 
-    if (-not $driver) {
-        $driver = Get-CimInstance Win32_PnPSignedDriver |
-            Where-Object {
-                $_.Manufacturer -like "*Intel*" -and
-                ($_.DeviceName -like "*SMBus*" -or $_.DeviceName -like "*Chipset*")
-            } | Select-Object -First 1
+    $entry = Get-ItemProperty HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "*AMD Chipset*" } | Select-Object DisplayVersion | Select-Object -First 1
+
+    if ($entry) {
+        $versionStr = $entry.DisplayVersion
+
+        try {
+            $currentVersion = [Version]$versionStr
+            $targetVersion  = [Version]'8.03.25.247'
+            if ($currentVersion -lt $targetVersion) {
+                $isOldAMD = $true
+            }
+        } catch {
+            $isOldAMD = $false
+        }
+    } else {
+        $entry = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Intel(R) Chipset*" -or $_.DisplayName -like "*Intel Chipset Device Software*" } | Select-Object -First 1
+
+        if ($entry) {
+            $versionStr = $entry.DisplayVersion
+            $isOldAMD = $false
+        }
     }
 
-    if ($driver) {
-        return $driver.DriverVersion
+    [PSCustomObject]@{
+        DriverVersion = $versionStr
+        isOldAMD      = $isOldAMD
     }
 }
 
@@ -4062,6 +4076,7 @@ function BIOS_TPM_ResetMessage {
     Log-Output "Reset the TPM from the BIOS. Look for 'Pending Operation'."
     Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
     Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
+    Log-Output "`nOption 2: Advanced->'Attempt TPM State Mismatch Repair'"
 }
 
 function Show-UserRecommendedSteps ($Data) {
@@ -4218,18 +4233,12 @@ function Show-UserRecommendedSteps ($Data) {
         $Data.CodBroker.Passed
     ) {
         Log-Output "POSSIBLE ISSUE: Windows appears to have been previously installed on another PC." 'Yellow'
-        Log-Output "-> CONSIDER: Clean Windows Install"
+        Log-Output "Potential TPM 'state mismatch'." 'Yellow'
         Has-Issue
     }
 
-    if ($Data.CpuInfo.Socket -eq "AM5" -and
-        $Data.MotherboardSwap.WasSwapped -and
-        $Data.OverallPassResult -eq 0 -and
-        $Data.CodBroker.Passed -and
-        -not (Is-NextGenTPM -Data $Data)
-    ) {
-        Log-Output "Potential TPM 'state mismatch'." 'Yellow'
-        BIOS_TPM_ResetMessage
+    if ($Data.OverallPassResult -eq 0 -and $Data.ChipsetVersion.isOldAMD -and $Data.CpuInfo.isAmd -and (-not $Data.TpmInfo.AmdFixRequired) ){
+        Log-Output "Best practice is to update AMD chipset driver: $($Data.ChipsetVersion.DriverVersion) https://www.amd.com/en/support/download/drivers.html" 'Yellow'
         Has-Issue
     }
 
@@ -4333,7 +4342,7 @@ function Show-UIOutput ($Data) {
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
 
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
-    Log-Output "Chipset:      $($Data.ChipsetVersion)"
+    Log-Output "Chipset:      $($Data.ChipsetVersion.DriverVersion)"
     Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
