@@ -4076,7 +4076,7 @@ function BIOS_TPM_ResetMessage {
     Log-Output "Reset the TPM from the BIOS. Look for 'Pending Operation'."
     Log-Output " AM4 Gigabyte->BIOS->Advanced->Miscellaneous->Trusted Computing 2.0->Pending Operation->TPM Clear."
     Log-Output " AM5 MSI->Security->Trusted Computing 2.0->Pending Operation->TPM Clear."
-    Log-Output "`nOption 2: Advanced->'Attempt TPM State Mismatch Repair'"
+    Log-Output "`nOption 2: Tool->Advanced->'Attempt TPM State Mismatch Repair'"
 }
 
 function Show-UserRecommendedSteps ($Data) {
@@ -4238,7 +4238,7 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if ($Data.OverallPassResult -eq 0 -and $Data.ChipsetVersion.isOldAMD -and $Data.CpuInfo.isAmd -and (-not $Data.TpmInfo.AmdFixRequired) ){
-        Log-Output "Best practice is to update AMD chipset driver: $($Data.ChipsetVersion.DriverVersion) https://www.amd.com/en/support/download/drivers.html" 'Yellow'
+        Log-Output "Best practice is to update AMD chipset driver: $($Data.ChipsetVersion.DriverVersion) Tool->Dev->'Update AMD Chipset Driver'" 'Yellow'
         Has-Issue
     }
 
@@ -5590,6 +5590,41 @@ $postRebootScript = @'
         }
     }
 
+    function Open-AmdInstallManager {
+		$registryKeys = @(
+			"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+			"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+		)
+
+		$amdInstallKey = Get-ItemProperty -Path $registryKeys -ErrorAction SilentlyContinue |
+			Where-Object { $_.DisplayName -like "*AMD Install Manager*" -and $_.InstallLocation } |
+			Select-Object -First 1
+
+		$exePath = $null
+
+		if ($amdInstallKey) {
+			$possiblePath = Join-Path -Path $amdInstallKey.InstallLocation -ChildPath "AMDInstallManager.exe"
+			if (Test-Path $possiblePath) {
+				$exePath = $possiblePath
+			}
+		}
+
+		if (-not $exePath) {
+			$defaultPath = "$env:ProgramFiles\AMD\AMDInstallManager\AMDInstallManager.exe"
+			if (Test-Path $defaultPath) {
+				$exePath = $defaultPath
+			}
+		}
+
+		if ($exePath) {
+			Show-MessageBox -Title "Drivers" -Description "Please update AMD chipset drivers"
+			Start-Process $exePath
+		}
+		else {
+			Show-MessageBox -Title "Drivers" -Description "Please download and install AMD Drivers"
+			Start-Process "https://www.amd.com/en/support/download/drivers.html"
+		}
+	}
 
 # =========================================================================
 # GUI FORM
@@ -5633,6 +5668,7 @@ $postRebootScript = @'
 
     $isWin11 = [Environment]::OSVersion.Version.Build -ge 22000
     $tpmInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+    $isAmd = (Get-CimInstance Win32_Processor).Manufacturer -eq 'AuthenticAMD'
 
     # --- Advanced Menu ---
     $menuAdvanced = New-Object System.Windows.Forms.ToolStripMenuItem("Advanced")
@@ -5806,6 +5842,13 @@ $itemResetTpm.Add_Click({
         $ItemCertChainRepair.Enabled = $false
     }
 
+    if ($isAmd) {
+        $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+        $itemRunTpmMsc = $menuDev.DropDownItems.Add("Update AMD Chipset Driver")
+        $itemRunTpmMsc.Add_Click({
+           Open-AmdInstallManager
+        })
+    }
 
     $menuDev.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     $itemRunTpmMsc = $menuDev.DropDownItems.Add("tpm.msc")
