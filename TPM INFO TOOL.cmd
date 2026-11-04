@@ -5645,29 +5645,21 @@ $itemResetTpm.Add_Click({
 
     $data = $syncHash.Data
     $runFix = $false
-    $isBypassableFailure = $false
 
     if ($data.OverallPassResult -eq 1 -or $data.TpmInfo.AmdFixRequired) {
         Show-MessageBox -Title "Status" -Description "This PC does not have state-mismatch."
-        if ($data.OverallPassResult -eq 1 -and -not $data.TpmInfo.AmdFixRequired) {
-            $isBypassableFailure = $true
-        }
     }
     elseif (-not $data.BiosInfo.ReasonablePassed -or $data.BitLocker.Passed -or $data.PcrData.HasFailures) {
         Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
-        if (-not $data.BiosInfo.ReasonablePassed -and -not $data.BitLocker.Passed -and -not $data.PcrData.HasFailures) {
-            $isBypassableFailure = $true
-        }
     }
     elseif ($data.TestInfooolScripts.PostReboot) {
         Show-MessageBox -Title "Status" -Description "Fix already attempted."
-        $isBypassableFailure = $true
     }
     else {
         $runFix = $true
     }
 
-    if (-not $runFix -and $isBypassableFailure -and $syncHash.devMode) {
+    if (-not $runFix -and $syncHash.devMode -and (-not $data.TpmInfo.AmdFixRequired) -and (-not $data.PcrData.HasFailures) ) {
         $devConfirm = [System.Windows.Forms.MessageBox]::Show(
             "You are running in dev mode and a bypassable check failed. Would you like to bypass the check and continue anyway?",
             'Warning',
