@@ -625,7 +625,7 @@ function Get-AgesaVersion {
     }
 }
 
-function Test-MSI {
+function Test-HardwareManufacturer {
     [CmdletBinding()]
     param()
 
@@ -643,11 +643,15 @@ function Test-MSI {
         }
     }
 
-    $pattern = 'MSI|MICRO-STAR'
-    $isMSI = $normalized.Manufacturer -match $pattern
+    $msiPattern = 'MSI|MICRO-STAR'
+    $dellPattern = 'DELL|ALIENWARE'
+
+    $msiMatches = @($normalized.Manufacturer) -match $msiPattern
+    $dellMatches = @($normalized.Manufacturer) -match $dellPattern
 
     [PSCustomObject]@{
-        IsMSI          = ($isMSI.Count -gt 0)
+        IsMSI  = ($msiMatches.Count -gt 0)
+        IsDell = ($dellMatches.Count -gt 0)
     }
 }
 
@@ -3533,7 +3537,7 @@ $syncHash.Checks = [ordered]@{
     CompatibilityFlags       = New-Check "Test-CompatibilityFlag"
     UACLevel                 = New-Check "Get-UacStatus"
     Sha256                   = New-Check "Test-TPMSha256Support"
-    MsiTestStatus            = New-Check "Test-MSI"
+    TestHardwareManufacturer = New-Check "Test-HardwareManufacturer"
     AgesaVersion             = New-Check "Get-AgesaVersion"
     LatestUpdatesSummary     = New-Check "Get-LatestUpdatesSummary"
     ScoreShims               = New-Check "Get-DbxShimScore"
@@ -4171,7 +4175,7 @@ function Show-UserRecommendedSteps ($Data) {
         Log-Output "[WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
         Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
 
-        if ($Data.MsiTestStatus.IsMSI){
+        if ($Data.TestHardwareManufacturer.IsMSI){
             Log-Output "->https://www.msi.com/faq/faq-12386 Resolve the 'BIOS Firmware Update Required' Prompt When Running Call of Duty" 'Yellow'
         }
 
@@ -4200,10 +4204,15 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($Data.PcrData.HasFailures -and $Data.MsiTestStatus -and $BatteryInfo.Text -eq "Laptop") {
+    if ($Data.PcrData.HasFailures -and $Data.TestHardwareManufacturer.IsMSI -and $BatteryInfo.Text -eq "Laptop") {
         if ($PcrData.PcrMismatches -contains 7) {
             Log-Output "PCR 7 - bootx64.efi - https://www.msi.com/faq/faq-11370" 'Yellow'
         }
+        Has-Issue
+    }
+
+    if ($Data.PcrData.HasFailures -and $Data.TestHardwareManufacturer.IsDell) {
+        Log-Output "TRY: BIOS (F2)->Advanced or Security tab. Find Intel Trusted Execution Technology (TXT). Set to Disabled. F10" 'Yellow'
         Has-Issue
     }
 
