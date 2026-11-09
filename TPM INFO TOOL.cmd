@@ -5981,6 +5981,9 @@ $itemResetTpm.Add_Click({
     }
     $btnUpload.FlatAppearance.BorderSize = 0
 
+    $toolTip = New-Object System.Windows.Forms.ToolTip
+    $toolTip.SetToolTip($btnUpload, "Upload results for research or to generate a unique code to share results")
+
     $btnUpload.Add_Click({
        Submit-ResearchData -Button $btnUpload -SyncHash $syncHash
     })
