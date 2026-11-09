@@ -5868,11 +5868,18 @@ $itemResetTpm.Add_Click({
     # --- About Menu ---
     $menuAbout = New-Object System.Windows.Forms.ToolStripMenuItem("About")
     $menuAbout.Alignment = [System.Windows.Forms.ToolStripItemAlignment]::Right
+    $menuAbout.DropDownDirection = [System.Windows.Forms.ToolStripDropDownDirection]::BelowLeft
 
     $itemAboutWebsite = $menuAbout.DropDownItems.Add("Visit Website - arrowGaming.dev")
     $itemAboutWebsite.Add_Click({ [System.Diagnostics.Process]::Start("https://" + "arrowgaming" + ".dev/tpm-info-tool") })
     $itemAboutWebsite2 = $menuAbout.DropDownItems.Add("Visit github for latest version")
     $itemAboutWebsite2.Add_Click({ Start-Process "https://github.com/ArrowGamingCode/TPM-INFO-TOOL" })
+
+    $itemAboutClose = $menuAbout.DropDownItems.Add("Clear Clipboard and Close Program")
+    $itemAboutClose.Add_Click({
+        [System.Windows.Forms.Clipboard]::Clear()
+        $form.Close()
+    })
 
     [void]$menuStrip.Items.Add($menuAdvanced)
     [void]$menuStrip.Items.Add($menuDev)
@@ -5965,7 +5972,7 @@ $itemResetTpm.Add_Click({
     $btnUpload = New-Object System.Windows.Forms.Button -Property @{
         Location  = New-Object System.Drawing.Point(0, 0)
         Size      = New-Object System.Drawing.Size(546, 40)
-        Text      = "Upload Diagnostic Data for Research or Help Code"
+        Text      = "Upload Results for Help Code"
         Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
         FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
         BackColor = $blueBtn
@@ -5980,8 +5987,8 @@ $itemResetTpm.Add_Click({
 
     $btnSaveImage = New-Object System.Windows.Forms.Button -Property @{
         Location  = New-Object System.Drawing.Point(0, 50)
-        Size      = New-Object System.Drawing.Size(268, 40)
-        Text      = "Save Report to Image"
+        Size      = New-Object System.Drawing.Size(546, 40)
+        Text      = "Save Results to Image"
         Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
         FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
         BackColor = $darkGreyBtn
@@ -5992,23 +5999,6 @@ $itemResetTpm.Add_Click({
 
     $btnSaveImage.Add_Click({
         Export-ReportToImage -ImageBuffer $syncHash.ImageBuffer -ColorMap $syncHash.ColorMap
-    })
-
-    $btnClearClose = New-Object System.Windows.Forms.Button -Property @{
-        Location  = New-Object System.Drawing.Point(278, 50)
-        Size      = New-Object System.Drawing.Size(268, 40)
-        Text      = "Clear Clipboard and Close"
-        Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
-        FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-        BackColor = $darkGreyBtn
-        ForeColor = [System.Drawing.Color]::White
-        Cursor    = [System.Windows.Forms.Cursors]::Hand
-    }
-    $btnClearClose.FlatAppearance.BorderSize = 0
-
-    $btnClearClose.Add_Click({
-        [System.Windows.Forms.Clipboard]::Clear()
-        $form.Close()
     })
 
     if ($syncHash.IsUploadEnabled) {
