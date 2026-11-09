@@ -115,12 +115,14 @@ $syncHash = [hashtable]::Synchronized(@{
     WebUrl          = ""
     PCID            = ""
     Data            = $null
+    RefreshTpmDiagnostics = $false
 
     Checks          = $null
     CheckStates     = [hashtable]::Synchronized(@{})
     Jobs            = [hashtable]::Synchronized(@{})
 
     IsUploadEnabled = $true
+
 
     ImageBuffer    = [System.Collections.Generic.List[PSObject]]::new()
     DataBuffer     = [System.Collections.Generic.List[PSObject]]::new()
@@ -3904,13 +3906,17 @@ function Check-CodBrokerService {
 }
 
 function Show-CheckFailures {
+    param([switch]$ConsoleOnly)
+
     if (-not $global:CheckFailures -or $global:CheckFailures.Count -eq 0) { return }
 
-    foreach ($failure in $global:CheckFailures) {
-        $firstLine = ($failure.Error -split "`r?`n")[0]
-        $syncHash.DataBuffer.Add([PSCustomObject]@{
-            Text = ">>Check failed: $($failure.Name) ($($failure.Function)) - $firstLine"
-        })
+    if (-not $ConsoleOnly) {
+        foreach ($failure in $global:CheckFailures) {
+            $firstLine = ($failure.Error -split "`r?`n")[0]
+            $syncHash.DataBuffer.Add([PSCustomObject]@{
+                Text = ">>Check failed: $($failure.Name) ($($failure.Function)) - $firstLine"
+            })
+        }
     }
 
     if ($syncHash.devMode) {
@@ -3919,6 +3925,33 @@ function Show-CheckFailures {
             Write-GuiHost "$($failure.Name): $($failure.Error)" -ForegroundColor Red
         }
     }
+}
+
+function Update-TpmDiagnosticsResults {
+    param([Parameter(Mandatory = $true)]$Data)
+
+    Write-GuiHost "`nRefreshing TPM Diagnostic results..." -ForegroundColor Cyan
+
+    try {
+        $Data.TpmDiagnosticsInfo = Get-TpmDiagnosticsInfo
+    }
+    catch {
+        $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = ">>Refresh failed: Get-TpmDiagnosticsInfo - $($_.Exception.Message)" })
+        Write-GuiHost "Refresh failed: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    $syncHash.DataBuffer.Add([PSCustomObject]@{ Text = ">>Refreshed Get-TpmDiagnosticsInfo" })
+
+    # Start the report buffers from scratch so nothing is printed/copied twice.
+    $global:ClipboardBuffer = ""
+    $syncHash.ImageBuffer.Clear()
+
+    $syncHash.Data = $Data
+
+    Show-UIOutput -Data $Data
+    Show-CheckFailures -ConsoleOnly
+    Show-UserRecommendedSteps -Data $Data
 }
 
 function Start-TPM-Maintenance {
@@ -5441,7 +5474,9 @@ $postRebootScript = @'
     function Install-TPMDiagnostic {
         Write-Host "TPM Diagnostic is VERY slow to install. Come back in 30 minutes!" -ForegroundColor Yellow
         DISM /Online /Add-Capability /CapabilityName:Tpm.TpmDiagnostics~~~~0.0.1.0
-        Write-Host "Please re-run tool"
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 3010) {
+            Write-Host "`nRefreshing Results" -ForegroundColor Green
+        }
     }
 
     function Run-CertChainRepair {
@@ -5600,40 +5635,40 @@ $postRebootScript = @'
     }
 
     function Open-AmdInstallManager {
-		$registryKeys = @(
-			"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-			"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
-		)
+        $registryKeys = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        )
 
-		$amdInstallKey = Get-ItemProperty -Path $registryKeys -ErrorAction SilentlyContinue |
-			Where-Object { $_.DisplayName -like "*AMD Install Manager*" -and $_.InstallLocation } |
-			Select-Object -First 1
+        $amdInstallKey = Get-ItemProperty -Path $registryKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*AMD Install Manager*" -and $_.InstallLocation } |
+            Select-Object -First 1
 
-		$exePath = $null
+        $exePath = $null
 
-		if ($amdInstallKey) {
-			$possiblePath = Join-Path -Path $amdInstallKey.InstallLocation -ChildPath "AMDInstallManager.exe"
-			if (Test-Path $possiblePath) {
-				$exePath = $possiblePath
-			}
-		}
+        if ($amdInstallKey) {
+            $possiblePath = Join-Path -Path $amdInstallKey.InstallLocation -ChildPath "AMDInstallManager.exe"
+            if (Test-Path $possiblePath) {
+                $exePath = $possiblePath
+            }
+        }
 
-		if (-not $exePath) {
-			$defaultPath = "$env:ProgramFiles\AMD\AMDInstallManager\AMDInstallManager.exe"
-			if (Test-Path $defaultPath) {
-				$exePath = $defaultPath
-			}
-		}
+        if (-not $exePath) {
+            $defaultPath = "$env:ProgramFiles\AMD\AMDInstallManager\AMDInstallManager.exe"
+            if (Test-Path $defaultPath) {
+                $exePath = $defaultPath
+            }
+        }
 
-		if ($exePath) {
-			Show-MessageBox -Title "Drivers" -Description "Please update AMD chipset drivers"
-			Start-Process $exePath
-		}
-		else {
-			Show-MessageBox -Title "Drivers" -Description "Please download and install AMD Drivers"
-			Start-Process "https://www.amd.com/en/support/download/drivers.html"
-		}
-	}
+        if ($exePath) {
+            Show-MessageBox -Title "Drivers" -Description "Please update AMD chipset drivers"
+            Start-Process $exePath
+        }
+        else {
+            Show-MessageBox -Title "Drivers" -Description "Please download and install AMD Drivers"
+            Start-Process "https://www.amd.com/en/support/download/drivers.html"
+        }
+    }
 
 # =========================================================================
 # GUI FORM
@@ -5752,6 +5787,20 @@ $itemResetTpm.Add_Click({
         $itemInstallTPMDiag.add_Click({
             param($sender, $e)
             Run-PowerShell -FunctionName "Install-TPMDiagnostic"
+
+            $nowInstalled = (Get-WindowsCapability -Online -Name "Tpm.TpmDiagnostics~~~~0.0.1.0" -ErrorAction SilentlyContinue).State -eq "Installed"
+
+            if ($nowInstalled) {
+                $sender.Text    = "Windows TPM Diagnostic already installed"
+                $sender.Enabled = $false
+
+                if ($isWin11) {
+                    $ItemCertChainRepair.Enabled   = $true
+                    $ItemCertChainRepair.ForeColor = [System.Drawing.SystemColors]::ControlText
+                }
+
+                $syncHash.RefreshTpmDiagnostics = $true
+            }
         })
     }elseif ($tpmInstalled){
         $itemInstallTPMDiag = $menuAdvanced.DropDownItems.Add("Windows TPM Diagnostic already installed")
@@ -6195,6 +6244,10 @@ try {
         Check-CodBrokerService -Data $Data
 
         while (-not $guiAsync.IsCompleted) {
+            if ($syncHash.RefreshTpmDiagnostics) {
+                $syncHash.RefreshTpmDiagnostics = $false
+                Update-TpmDiagnosticsResults -Data $Data
+            }
             Start-Sleep -Milliseconds 200
         }
     }
