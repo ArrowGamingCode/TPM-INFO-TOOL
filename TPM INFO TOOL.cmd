@@ -389,6 +389,29 @@ function Get-CpuCompliance {
     }
 }
 
+function Get-CpuMicrocode {
+    [CmdletBinding()]
+    param (
+        [int]$Core = 0
+    )
+
+    $registrypath = "Registry::HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\$Core\"
+
+    try {
+        $runningMicrocode = (Get-ItemProperty -Path $registrypath -ErrorAction Stop)."Update Revision"
+
+        if ($null -ne $runningMicrocode) {
+            $runningMicrocodeInHex = (-join ( $runningMicrocode[0..4] | foreach { $_.ToString("X2") } )).TrimStart('0')
+            return "0x$runningMicrocodeInHex"
+        } else {
+            Write-Warning "Update Revision not found for core $Core."
+        }
+    }
+    catch {
+        Write-Error "Could not access registry path for core $Core : $_"
+    }
+}
+
 function Get-BatteryStatus {
     try {
         $battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
@@ -3478,6 +3501,7 @@ function New-Check {
 
 $syncHash.Checks = [ordered]@{
     CpuInfo                  = New-Check "Get-CpuCompliance"
+    CpuMicrocode             = New-Check "Get-CpuMicrocode"
     TpmInfo                  = New-Check "Get-TpmStatus"
     CsmInfo                  = New-Check "Get-CsmStatus"
     TpmOwnership             = New-Check "Get-TpmOwnershipState"
@@ -4385,6 +4409,7 @@ function Show-UIOutput ($Data) {
 
     Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
     Log-Output "Chipset:      $($Data.ChipsetVersion.DriverVersion)"
+    Log-Output "Microcode:    $($Data.CpuMicrocode)"
     Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
