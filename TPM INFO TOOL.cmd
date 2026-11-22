@@ -2860,6 +2860,29 @@ function Get-EventId87 {
     }
 }
 
+function Get-LastInPlaceUpgradeDate {
+    $keys = Get-ChildItem "HKLM:\SYSTEM\Setup" -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSChildName -like "Source OS*" }
+
+    $dates = foreach ($key in $keys) {
+        if ($key.PSChildName -match '\(Updated on\s+(.+?)\)') {
+            try {
+                [datetime]::Parse($matches[1])
+            }
+            catch {
+                $matches[1]
+            }
+        }
+    }
+
+    if ($dates) {
+        ($dates | Sort-Object -Descending | Select-Object -First 1).ToString("yyyy-MM-dd")
+    }
+    else {
+        $null
+    }
+}
+
 # -------------------------------------------------------------------------
 # Check wrappers
 # -------------------------------------------------------------------------
@@ -3549,6 +3572,7 @@ $syncHash.Checks = [ordered]@{
     TpmEndorsement           = New-Check "Get-TpmEndorsementCertStatus"
     OriginalOSBuild          = New-Check "Get-OriginalOsBuild"
     DaysSinceInstall         = New-Check "Get-DaysSinceInstall"
+    LastInPlaceUpgradeDate   = New-Check "Get-LastInPlaceUpgradeDate"
     BitLocker                = New-Check "Get-BitLockerStatus"
     ExtendedTpmProperties    = New-Check "Get-ExtendedTpmProperties"
     TpmKeyAttestation        = New-Check "Test-TpmKeyAttestationSupport"
@@ -4530,6 +4554,8 @@ function Show-UIOutput ($Data) {
     }
 
     Log-Output "Windows Age:  $($Data.DaysSinceInstall) days"
+    Log-Output "InPlace Upgrade: $($Data.LastInPlaceUpgradeDate)"
+
     if ($Data.BitLocker -and $Data.BitLocker.Passed) {
         Log-Output "BitLocker Enabled: Yes" 'Red'
     } else {
@@ -6046,7 +6072,7 @@ $itemResetTpm.Add_Click({
     $btnUpload = New-Object System.Windows.Forms.Button -Property @{
         Location  = New-Object System.Drawing.Point(0, 0)
         Size      = New-Object System.Drawing.Size(546, 40)
-        Text      = "Upload Results for Help Code"
+        Text      = "Upload Results for Result Code"
         Font      = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
         FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
         BackColor = $blueBtn
