@@ -4647,9 +4647,9 @@ function Show-UIOutput ($Data) {
     }
 
     if ($Data.HasEndorsementKey.Result){
-        Log-Output "[PASS]: Has EK Key" 'green'
+        Log-Output "[PASS] Has EK Key" 'green'
     }else{
-        Log-Output "[FAIL]: No EK Key" 'red'
+        Log-Output "[FAIL] No EK Key" 'red'
     }
     
     if ($Data.HasEndorsementKey.Error -ne $null){
@@ -6046,6 +6046,35 @@ $itemResetTpm.Add_Click({
     $itemRunTpmMsc = $menuDev.DropDownItems.Add("tpm.msc")
     $itemRunTpmMsc.Add_Click({
         Start-Process "tpm.msc"
+    })
+
+    $itemRebootToBios = $menuDev.DropDownItems.Add("Restart into BIOS")
+    $itemRebootToBios.Add_Click({
+
+        if ($syncHash.Data -and $syncHash.Data.CsmInfo -and -not $syncHash.Data.CsmInfo.Passed) {
+            Show-MessageBox -Title "Restart into BIOS" -Description ("This feature is not supported on this pc")
+            return
+        }
+
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Your PC will restart immediately and open the BIOS. `nRestart now?",
+            'Restart into BIOS',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+        $exitCode = $null
+        try {
+            $proc = Start-Process -FilePath "$env:SystemRoot\System32\shutdown.exe" -ArgumentList "/r", "/fw", "/t", "0" -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+            $exitCode = $proc.ExitCode
+        } catch {
+            $exitCode = -1
+        }
+
+        if ($exitCode -ne 0) {
+            Show-MessageBox -Title "Restart into BIOS" -Description ("Windows couldn't restart into the BIOS on this PC (code $exitCode).`n`n" + $manualSteps)
+        }
     })
 
     # --- About Menu ---
