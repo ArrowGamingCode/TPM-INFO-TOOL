@@ -6,7 +6,7 @@
 :: # Purpose: An experimental tool that displays technical information to help troubleshoot TPM-related settings for gaming.
 :: # Use official tools and troubleshooting first!
 :: # License: GNU General Public License version 3
-set "TPM_TOOL_VERSION=1.0.22"
+set "TPM_TOOL_VERSION=1.0.23"
 
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -1453,6 +1453,43 @@ function Get-TpmEndorsementCertStatus {
     }
 }
 
+function Start-TPM-Maintenance {
+    param(
+        [int]$TimeoutSeconds = 8
+    )
+
+    $Path = "\Microsoft\Windows\TPM\"
+    $Name = "Tpm-Maintenance"
+
+    $before = Get-ScheduledTaskInfo -TaskPath $Path -TaskName $Name -ErrorAction Ignore
+    if (-not $before) { return $false }
+    $lastRunBefore = $before.LastRunTime
+
+    try {
+        Start-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Stop
+    } catch {
+        return $false
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $seenRunning = $false
+
+    while ((Get-Date) -lt $deadline) {
+        $state = (Get-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Ignore).State
+        $info  = Get-ScheduledTaskInfo -TaskPath $Path -TaskName $Name -ErrorAction Ignore
+
+        if ($state -eq 'Running') {
+            $seenRunning = $true
+        } elseif ($info -and ($seenRunning -or $info.LastRunTime -ne $lastRunBefore)) {
+            return $info.LastTaskResult -eq 0
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    return $false
+}
+
 function HasEndorsementKey {
     param(
         [int]$MaxAttempts = 3
@@ -2395,13 +2432,14 @@ function Get-CertreqAttestation($Data) {
     }
 
     $IsOverallAIKPass = Get-OverallPassStatus -enrollSuccess $enrollSuccess -data $Data
+    $isPluton = ((-not [string]::IsNullOrEmpty($certRaw)) -and (Test-CertutilPluton -CertutilText $certRaw)) -or (Is-Pluton)
 
     if ($IsOverallAIKPass) {
         $OverallPassResult = 1;
     }else{
         $OverallPassResult = 0;
 
-        if (Is-NextGenTPM -Data $Data) {
+        if ($isPluton -or (Is-NextGenTPM -Data $Data)) {
             $OverallPassResult = 2;
         }
 
@@ -2425,6 +2463,7 @@ function Get-CertreqAttestation($Data) {
         NameResolutionFailure = $nameResolutionFailure
         FailureMessage        = $failureMessage
         KeyID                 = $keyID
+        IsPluton              = $isPluton
     }
 }
 
@@ -2991,12 +3030,6 @@ function Get-CertreqAttestationResult {
     param([hashtable]$DependencyResults)
 
     Get-CertreqAttestation -Data $DependencyResults
-}
-
-function Get-PlutonStatus {
-    param([hashtable]$DependencyResults)
-
-    (Test-CertutilPluton -CertutilText $DependencyResults.CertreqAttestation.CertRaw) -or (Is-Pluton)
 }
 
 function Get-TpmChainInfo {
@@ -3586,7 +3619,6 @@ $syncHash.Checks = [ordered]@{
     CodBrokerCycleStatus     = New-Check "Invoke-CodBrokerCycle" -After "CodBroker", "CodBrokerLog", "GetEvent1040Details", "EventId87"
 
     CertreqAttestation       = New-Check "Get-CertreqAttestationResult" -Dependencies "CpuInfo", "TpmInfo", "CsmInfo", "TpmOwnership", "HasEndorsementKey" -After "ActivisionKey", "GetEvent1040Details", "EventId87", "CodBrokerCycleStatus"
-    Pluton                   = New-Check "Get-PlutonStatus" -Dependencies "CertreqAttestation"
     TPMChainInfo             = New-Check "Get-TpmChainInfo" -Dependencies "CertreqAttestation"
 
     # ---- Slow checks
@@ -3647,7 +3679,7 @@ $syncHash.Checks = [ordered]@{
     FaceitService            = New-Check "Test-FaceitServiceInstalled"
     AutoProvision            = New-Check "Test-TpmNoAutoProvisionExists"
     StrictValidation         = New-Check "Test-TpmDisableStrictValidationExists"
-    TestInfooolScripts       = New-Check "Test-TpmInfoToolFiles"
+    TestInfoToolScripts       = New-Check "Test-TpmInfoToolFiles"
     TPMLastProvision         = New-Check "Get-TPMLastProvisionVersion"
 }
 
@@ -4050,18 +4082,6 @@ function Update-TpmDiagnosticsResults {
     Show-UserRecommendedSteps -Data $Data
 }
 
-function Start-TPM-Maintenance {
-    $Path = "\Microsoft\Windows\TPM\"
-    $Name = "Tpm-Maintenance"
-
-    Start-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Ignore
-    while ((Get-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Ignore).State -eq 'Running') {
-        Start-Sleep -Seconds 1
-    }
-
-    (Get-ScheduledTaskInfo -TaskPath $Path -TaskName $Name -ErrorAction Ignore).LastTaskResult -eq 0
-}
-
 function Format-ClipboardLine ($text) {
     $global:ClipboardBuffer += $text
 }
@@ -4301,14 +4321,14 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if ($Data.SecureBoot.Passed -and !$Data.SecureBootType.Passed) {
-        Log-Output "WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
-        Log-Output "-> [WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
-        Log-Output "-> [HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
+        Log-Output "[WARNING] Secure Boot is active but stuck in 'Setup Mode'!" 'Yellow'
+        Log-Output "-> WHY: The motherboard hasn't loaded its default factory platform certificates, meaning Secure Boot isn't actively enforcing rules." 'Yellow'
+        Log-Output "-> HOW TO FIX: Enter your BIOS, navigate to Secure Boot, and look for an option to 'Install Default Factory Keys' or reset Key Management." 'White'
         Has-Issue
     }
 
-    if ($Data.Pluton -and -not $Data.OverallPassResult -eq 1) {
-        Log-Output "[WARNING] This PC uses a Pluton TPM (which often don't work). Some devices let you turn this off in the BIOS" 'Yellow'
+    if ($Data.Pluton -and $Data.OverallPassResult -ne 1) {
+        Log-Output "[WARNING] This PC uses a Pluton TPM (which often doesn't work). Some devices let you turn this off in the BIOS" 'Yellow'
         Log-Output "-> On selected MSI_BIOS->Advanced->AMD fTPM switch->Change 'AMD CPU HSP' to AMD CPU fTPM" 'Yellow'
 
         if ($Data.TestHardwareManufacturer.IsMSI){
@@ -4330,7 +4350,7 @@ function Show-UserRecommendedSteps ($Data) {
 
     if (!$Data.MicrosoftCa.Passed) {
         Log-Output "[WARNING] Windows UEFI CA 2023 not found"  'Yellow'
-        Log-Output "-> COD MAY need this updated. However, irrespective of COD, its best practice to have this."
+        Log-Output "-> COD MAY need this updated. However, irrespective of COD, it's best practice to have this."
         Has-Issue
     }
 
@@ -4340,8 +4360,8 @@ function Show-UserRecommendedSteps ($Data) {
         Has-Issue
     }
 
-    if ($Data.PcrData.HasFailures -and $Data.TestHardwareManufacturer.IsMSI -and $BatteryInfo.Text -eq "Laptop") {
-        if ($PcrData.PcrMismatches -contains 7) {
+    if ($Data.PcrData.HasFailures -and $Data.TestHardwareManufacturer.IsMSI -and $Data.BatteryInfo.Text -eq "Laptop") {
+        if ($Data.PcrData.PcrMismatches -contains 7) {
             Log-Output "PCR 7 - bootx64.efi - https://www.msi.com/faq/faq-11370" 'Yellow'
         }
         Has-Issue
@@ -4366,7 +4386,7 @@ function Show-UserRecommendedSteps ($Data) {
     }
 
     if (($Data.CpuInfo.Socket -eq 'AM4') -and (-not $Data.TpmInfo.AmdFixRequired) -and($Data.PcrData.HasFailures) ) {
-        Log-Output "PCR MISMATCH'." 'Yellow'
+        Log-Output "PCR MISMATCH." 'Yellow'
         Log-Output "-> TRY: MSI AM4 BIOS. Settings → Advanced → Windows OS Configuration → Secure Boot."
         Log-Output "-> Change:Secure Boot Security Mode From: Standard To: Custom > Maximum Security"
         Has-Issue
@@ -4645,8 +4665,8 @@ function Show-UIOutput ($Data) {
         Log-Output "INFO: Reg DisableStrictValidation" 'DarkYellow'
     }
 
-    $scriptStatus = if ($Data.TestInfooolScripts.PostReboot) { "T" } else { "F" }
-    $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLog)     { "T" } else { "F" }
+    $scriptStatus = if ($Data.TestInfoToolScripts.PostReboot) { "T" } else { "F" }
+    $logStatus    = if ($Data.TestInfoToolScripts.ImportCAsLog)     { "T" } else { "F" }
     Log-Output "PostReboot: $scriptStatus | ImportCA: $logStatus"
 
     if($Data.TPMLastProvision.IsDifferent){
@@ -5846,7 +5866,7 @@ $itemResetTpm.Add_Click({
     elseif (-not $data.BiosInfo.ReasonablePassed -or $data.BitLocker.Passed -or $data.PcrData.HasFailures) {
         Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
     }
-    elseif ($data.TestInfooolScripts.PostReboot) {
+    elseif ($data.TestInfoToolScripts.PostReboot) {
         Show-MessageBox -Title "Status" -Description "Fix already attempted."
     }
     else {
@@ -5987,7 +6007,7 @@ $itemResetTpm.Add_Click({
                 Show-MessageBox -Title "Status" -Description "This PC does not have intermediate Cert issues."
             } elseif (-not $syncHash.Data.BiosInfo.Passed -or $syncHash.Data.BitLocker.Passed -or $syncHash.Data.PcrData.HasFailures) {
                 Show-MessageBox -Title "Status" -Description "This fix is not supported on this PC."
-            } elseif (-not $syncHash.Data.TestInfooolScripts.PostReboot) {
+            } elseif (-not $syncHash.Data.TestInfoToolScripts.PostReboot) {
                 Show-MessageBox -Title "Status" -Description "Please run 'Attempt TPM 'State Mismatch Repair' first."
             } else {
                 $runScript = [System.Windows.Forms.MessageBox]::Show(
@@ -6293,6 +6313,7 @@ function Build-SystemData {
     $properties["EnrollSuccess"]         = $certreq.EnrollSuccess
     $properties["NameResolutionFailure"] = $certreq.NameResolutionFailure
     $properties["FailureMessage"]        = $certreq.FailureMessage
+    $properties["Pluton"]                = [bool]$certreq.IsPluton
 
     $global:platforms = $properties["Platforms"]
 
@@ -6345,8 +6366,17 @@ $null = $guiPowerShell.AddScript($guiScript).AddArgument($syncHash)
 $guiAsync = $guiPowerShell.BeginInvoke()
 $runspacePool = New-WorkerRunspacePool
 
-while (-not $syncHash.IsGuiReady) {
+while (-not $syncHash.IsGuiReady -and -not $guiAsync.IsCompleted) {
     Start-Sleep -Milliseconds 100
+}
+
+if (-not $syncHash.IsGuiReady) {
+    try { $null = $guiPowerShell.EndInvoke($guiAsync) } catch {}
+    Close-WorkerRunspacePool
+    try { $guiPowerShell.Dispose() } catch {}
+    try { $guiRunspace.Close() } catch {}
+    try { $guiRunspace.Dispose() } catch {}
+    exit 1
 }
 Show-UpdateMessage
 
