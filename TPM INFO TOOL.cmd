@@ -2450,7 +2450,7 @@ function Get-CertreqAttestation($Data) {
 
     #$OverallPassResult = 2;
 
-    $keyID = $false
+    $keyID = $null
     if ($certRaw -match 'KeyId[-=:]\s*(?<id>[A-Fa-f0-9]{32,})') {
         $keyID = $Matches['id']
     }
@@ -4738,9 +4738,9 @@ function Show-UIOutput ($Data) {
     }
     if ($data.FailureMessage) {
         if ($data.OverallPassResult -eq 1) {
-            Log-Output $data.FailureMessage 'Red'
-        }else{
             Log-Output $data.FailureMessage 'Yellow'
+        }else{
+            Log-Output $data.FailureMessage 'Red'
         }
     }
 
