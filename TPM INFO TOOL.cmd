@@ -1345,30 +1345,40 @@ function Get-TpmOwnershipState {
             $pendingRestart = if ($tpmCmd.RestartPending) { "." } else { "" }
             $statusText = "Ready: $isReady, Present: $($tpmCmd.TpmPresent)$pendingRestart"
 
+            $isTpm2OrHigher = $false
+            try {
+                $tpmWmi = Get-CimInstance -Namespace "root\cimv2\security\microsofttpm" -ClassName Win32_Tpm -ErrorAction SilentlyContinue
+                if ($tpmWmi -and $tpmWmi.SpecVersion) {
+                    $specMajor = [version](($tpmWmi.SpecVersion -split ',')[0].Trim())
+                    $isTpm2OrHigher = $specMajor -ge [version]"2.0"
+                }
+            } catch {
+                $isTpm2OrHigher = $false
+            }
+
             return [PSCustomObject]@{
-                Text           = $statusText
-                Passed         = $isReady
-                PendingRestart = $pendingRestart
+                Text              = $statusText
+                Passed            = [bool]$isReady -and $isTpm2OrHigher
+                PendingRestart    = $pendingRestart
                 ManufacturerIdTxt = $tpmCmd.ManufacturerIdTxt
             }
         } else {
             return [PSCustomObject]@{
-                Text           = "Unable to read TPM Ownership properties via Get-Tpm"
-                Passed         = $false
-                PendingRestart = $null
+                Text              = "Unable to read TPM Ownership properties via Get-Tpm"
+                Passed            = $false
+                PendingRestart    = $null
                 ManufacturerIdTxt = $null
             }
         }
     } catch {
         return [PSCustomObject]@{
-            Text           = "Error executing TPM Ownership query"
-            Passed         = $false
-            PendingRestart = $null
+            Text              = "Error executing TPM Ownership query"
+            Passed            = $false
+            PendingRestart    = $null
             ManufacturerIdTxt = $null
         }
     }
 }
-
 function Test-TPMSha256Support {
     $path = "HKLM:\SYSTEM\CurrentControlSet\Control\IntegrityServices"
     if (Test-Path $path) {
@@ -1418,10 +1428,10 @@ function Get-TpmEndorsementCertStatus {
 
         if ($HasMfg) {
             foreach ($Cert in $TpmInfo.ManufacturerCertificates) {
-                $CertIssuerList.Add("INFO:Manufacturer Cert: $($Cert.Issuer)")
+                $CertIssuerList.Add("INFO: Manufacturer Cert: $($Cert.Issuer)")
             }
         } else {
-            $CertIssuerList.Add("INFO:Manufacturer Cert: 0")
+            $CertIssuerList.Add("INFO: Manufacturer Cert: 0")
         }
 
         if ($HasAdd) {
@@ -1429,7 +1439,7 @@ function Get-TpmEndorsementCertStatus {
                 $CertIssuerList.Add("INFO: Additional Cert: $($Cert.Issuer)")
             }
         } else {
-            $CertIssuerList.Add("INFO:Additional Cert: 0")
+            $CertIssuerList.Add("INFO: Additional Cert: 0")
         }
 
         return [PSCustomObject]@{
@@ -1444,16 +1454,56 @@ function Get-TpmEndorsementCertStatus {
 }
 
 function HasEndorsementKey {
-    try {
-        $ek = Get-TpmEndorsementKeyInfo -ErrorAction Stop
-        if ($ek.PublicKey) {
-            return $true
-        } else {
-            return $false
-        }
-    } catch {
-        return $false
+    param(
+        [int]$MaxAttempts = 3
+    )
+
+    $Ownership = $null
+    $OwnershipState = if ($syncHash -and $syncHash.CheckStates) { $syncHash.CheckStates['TpmOwnership'] } else { $null }
+    if ($OwnershipState -and $OwnershipState.State -eq 'Completed') {
+        $Ownership = $OwnershipState.Result
+    } else {
+        try { $Ownership = Get-TpmOwnershipState } catch { $Ownership = $null }
     }
+    $OwnershipPassed = [bool]($Ownership -and $Ownership.Passed)
+
+    $MaintenanceRun = $false
+    $Checks = [Math]::Max($MaxAttempts, 1)
+    $LastError = $null
+
+    for ($Attempt = 1; $Attempt -le $Checks; $Attempt++) {
+        try {
+            $ek = Get-TpmEndorsementKeyInfo -ErrorAction Stop
+            if ($ek.PublicKey) {
+                return [pscustomobject]@{ Result = $true; Error = $null }
+            }
+            $LastError = $null
+        } catch {
+            $LastError = $_.Exception.Message
+        }
+
+        if ($MaxAttempts -le 0) {
+            break
+        }
+
+        if (-not $MaintenanceRun -and $OwnershipPassed) {
+            $MaintenanceRun = $true
+            $MaintenanceOk = Start-TPM-Maintenance
+            if ($MaintenanceOk -eq $false) {
+                return [pscustomobject]@{
+                    Result = $false
+                    Error  = "Start-TPM-Maintenance failed" +
+                             $(if ($LastError) { " (last EK error: $LastError)" } else { "" })
+                }
+            }
+        }
+
+        if ($Attempt -lt $Checks) {
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    return [pscustomobject]@{ Result = $false; Error = $LastError }
 }
 
 function Test-TpmNoAutoProvisionExists {
@@ -1505,9 +1555,7 @@ function Is-NextGenTPM {
     }
 
     if ($Data.CpuInfo.IsRyzenAI) {
-        if (-not $data.HasEndorsementKey) {
-            return $true
-        }
+        return $false
     }
 
     return $false
@@ -3528,7 +3576,7 @@ $syncHash.Checks = [ordered]@{
     TpmInfo                  = New-Check "Get-TpmStatus"
     CsmInfo                  = New-Check "Get-CsmStatus"
     TpmOwnership             = New-Check "Get-TpmOwnershipState"
-    HasEndorsementKey        = New-Check "HasEndorsementKey"
+    HasEndorsementKey        = New-Check "HasEndorsementKey" -After "TpmOwnership"
 
     ActivisionKey            = New-Check "Get-ActivisionKeyStatus"
     GetEvent1040Details      = New-Check "Get-Event1040Details"
@@ -4003,8 +4051,15 @@ function Update-TpmDiagnosticsResults {
 }
 
 function Start-TPM-Maintenance {
-    #Read TPM from nvram.
-    Start-ScheduledTask -TaskPath "\Microsoft\Windows\TPM\" -TaskName "Tpm-Maintenance"
+    $Path = "\Microsoft\Windows\TPM\"
+    $Name = "Tpm-Maintenance"
+
+    Start-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Ignore
+    while ((Get-ScheduledTask -TaskPath $Path -TaskName $Name -ErrorAction Ignore).State -eq 'Running') {
+        Start-Sleep -Seconds 1
+    }
+
+    (Get-ScheduledTaskInfo -TaskPath $Path -TaskName $Name -ErrorAction Ignore).LastTaskResult -eq 0
 }
 
 function Format-ClipboardLine ($text) {
@@ -4079,9 +4134,9 @@ function Show-PlatformStatus {
 
     if ($foundPlatforms.Count -gt 0) {
         $platformString = $foundPlatforms -join "/"
-        Log-Output "RESULT: COD $platformString Found"
+        Log-Output "COD $platformString Found"
     } else {
-        Log-Output "RESULT: Neither COD Steam/BNET detected"
+        Log-Output "Neither COD Steam/BNET detected"
     }
 }
 
@@ -4431,19 +4486,18 @@ function Show-UIOutput ($Data) {
     Log-Output "RAM Type:     $($Data.RamSlots)"
     Log-Output "TPM Version:  $($Data.TpmInfo.Text)"
 
-    Log-Output "TPM Status:   $($Data.TpmOwnership.Text)"
     Log-Output "Chipset:      $($Data.ChipsetVersion.DriverVersion)"
     Log-Output "Microcode:    $($Data.CpuMicrocode)"
     Log-Output "Hardware Swap:$($Data.MotherboardSwap.Message)"
 
     Log-Output "`n--- COMPLIANCE REPORT ---" 'Cyan'
     if ($Data.CpuInfo.IsOlderAmd) { Log-Output 'CRITICAL: AMD pre Zen 2 CPUs do not work.' 'Red' }
-    if ($Data.TpmInfo.Passed)  { Log-Output 'RESULT: TPM 2.0 Version Pass' 'Green' } else { Log-Output "CRITICAL: $($Data.TpmInfo.Text)" 'Red' }
+    if (-not $Data.TpmInfo.Passed)  { Log-Output "[FAIL] $($Data.TpmInfo.Text)" 'Red' }
 
     if ($Data.TpmOwnership.Passed) {
-        Log-Output 'RESULT: TPM Ownership/Ready State Pass' 'Green'
+        Log-Output "[PASS] TPM Status: $($Data.TpmOwnership.Text)" 'Green'
     } else {
-        Log-Output "CRITICAL: TPM is not fully Ready/Owned by Windows. (Run tpm.msc to fix)" 'Red'
+        Log-Output "[FAIL] TPM Status: $($Data.TpmOwnership.Text) (Run tpm.msc to fix)" 'Red'
     }
 
     if ($Data.TpmInfo.AmdFixRequired) {
@@ -4533,7 +4587,7 @@ function Show-UIOutput ($Data) {
 
      if ($Data.CoreIsolation.Passed) { Log-Output "[PASS]: $($Data.CoreIsolation.Message)" 'Green'
     } else {
-        Log-Output "Info: $($Data.CoreIsolation.Message)"
+        Log-Output "$($Data.CoreIsolation.Message)"
     }
 
     Log-Output "IME Driver Ver: $($Data.IntelMeVersion.DriverVersion) - Firmware Ver: $($Data.IntelMeVersion.FirmwareVersion) - Date: $($Data.IntelMeVersion.DriverDate)"
@@ -4572,7 +4626,16 @@ function Show-UIOutput ($Data) {
         Log-Output "RESULT: Why is CA2023 in Trusted Root Cert?" 'DarkYellow'
     }
 
-    Log-Output "INFO: EK: $($Data.HasEndorsementKey)"
+    if ($Data.HasEndorsementKey.Result){
+        Log-Output "[PASS]: Has EK Key" 'green'
+    }else{
+        Log-Output "[FAIL]: No EK Key" 'red'
+    }
+    
+    if ($Data.HasEndorsementKey.Error -ne $null){
+        Log-Output "[ERROR]: EK Key: $($Data.HasEndorsementKey.Error)" 'red'
+    }
+
     Log-Output "Win Update: $($Data.LatestUpdatesSummary)"
 
     if($Data.AutoProvision) {
@@ -4584,7 +4647,7 @@ function Show-UIOutput ($Data) {
 
     $scriptStatus = if ($Data.TestInfooolScripts.PostReboot) { "T" } else { "F" }
     $logStatus    = if ($Data.TestInfooolScripts.ImportCAsLog)     { "T" } else { "F" }
-    Log-Output "INFO: PostReboot: $scriptStatus | ImportCA: $logStatus"
+    Log-Output "PostReboot: $scriptStatus | ImportCA: $logStatus"
 
     if($Data.TPMLastProvision.IsDifferent){
         Log-Output "Last Provision:  $($Data.TPMLastProvision.LastFirmwareVersion)"
